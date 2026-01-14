@@ -1,0 +1,84 @@
+# ============================================
+# PINNED REQUIREMENTS - Stable for 2+ years
+# Last updated: Dec 2024
+# Python: 3.11 (EOL: Oct 2027)
+# ============================================
+
+# Core Flask (very stable, rarely breaks)
+flask==3.1.0
+flask-cors==5.0.0
+python-dotenv==1.0.1
+werkzeug==3.1.3
+jinja2==3.1.4
+itsdangerous==2.2.0
+click==8.1.7
+blinker==1.9.0
+
+# Vector DB & Embeddings (stable APIs)
+pinecone-client==5.0.1
+sentence-transformers==3.3.1
+
+# LLM Provider (Groq - stable API, committed to backwards compatibility)
+groq==0.13.0
+
+# PyTorch ecosystem (pinned to avoid breakage)
+torch==2.2.2
+transformers==4.47.1
+tokenizers==0.21.0
+numpy==1.26.4
+
+# HTTP & certificates
+requests==2.32.3
+certifi==2024.12.14
+urllib3==2.2.3
+charset-normalizer==3.4.0
+idna==3.10
+
+# Sentence-transformers dependencies (pinned)
+scikit-learn==1.6.0
+scipy==1.14.1
+joblib==1.4.2
+tqdm==4.67.1
+huggingface-hub==0.27.0
+safetensors==0.4.5
+filelock==3.16.1
+pillow==11.0.0
+regex==2024.11.6
+sympy==1.13.1
+networkx==3.4.2
+mpmath==1.3.0
+fsspec==2024.10.0
+
+# Groq dependencies
+httpx==0.28.1
+httpcore==1.0.7
+h11==0.14.0
+anyio==4.7.0
+sniffio==1.3.1
+pydantic==2.10.3
+pydantic-core==2.27.1
+annotated-types==0.7.0
+typing-extensions==4.12.2
+
+# For automated scraping (optional)
+selenium==4.27.1
+
+# ============================================
+# MAINTENANCE NOTES:
+# 
+# This file is INTENTIONALLY pinned to avoid:
+# - LangChain breaking changes (not using it)
+# - PyTorch/numpy version hell
+# - Pydantic v1/v2 conflicts
+# - HuggingFace API deprecations
+#
+# You should NOT need to update this for 1-2 years
+# unless you hit a critical security CVE.
+#
+# To check for security issues only:
+#   pip install pip-audit
+#   pip-audit
+#
+# Last tested: December 2024
+# Python: 3.11 (use conda/pyenv to lock this)
+# ============================================

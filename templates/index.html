@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+    <!-- Link to Font Awesome for Icons (Retained for other icons if needed) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-pVIQYQ6r2G47XJmV3jf5O9dN6KzIo1uGXXBvG6S5D4Zg1lPjzQ1Uf8fJgk7zFyFc6j3A9Z4+0mLVtRWjGKkZXQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        /* Container for the chat widget */
+        .chat-widget-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        /* Chat widget icon styling */
+        .chat-widget-icon {
+            width: 60px;
+            height: 60px;
+            background-color: #007bff;
+            border-radius: 50%;
+            cursor: pointer;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            transition: background-color 0.3s, transform 0.3s;
+            position: relative;
+        }
+
+        .chat-widget-icon:hover {
+            background-color: #0056b3;
+            transform: scale(1.05);
+        }
+
+        /* Chat widget icon image styling */
+        .chat-widget-icon img {
+            width: 60%;
+            height: 60%;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        /* Chat box styling */
+        .chat-box {
+            width: 350px;
+            max-width: 90vw;
+            height: 500px;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+            display: none;
+            flex-direction: column;
+            margin-bottom: 10px;
+            overflow: hidden;
+            transition: all 0.3s ease-in-out;
+        }
+
+        /* Header of the chat box */
+        .chat-header {
+            background-color: #007bff;
+            color: #fff;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .chat-header .close-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        /* Chat messages area */
+        .chat-messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        /* Message bubbles */
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user .message-text {
+            align-self: flex-end;
+            background-color: #007bff;
+            color: #fff;
+            border-radius: 15px 15px 0 15px;
+        }
+
+        .message.bot .message-text {
+            align-self: flex-start;
+            background-color: #e4e6eb;
+            color: #000;
+            border-radius: 15px 15px 15px 0;
+        }
+
+        .message-text {
+            padding: 10px 15px;
+            max-width: 80%;
+            word-wrap: break-word;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* Styling for links within messages */
+        .message-text a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .message-text a:hover {
+            text-decoration: underline;
+        }
+
+        /* Chat input area */
+        .chat-input {
+            display: flex;
+            border-top: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f1f1f1;
+        }
+
+        .chat-input textarea {
+            flex: 1;
+            border: none;
+            padding: 10px;
+            resize: none;
+            height: 50px;
+            outline: none;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        .chat-input button {
+            width: 50px;
+            height: 50px;
+            border: none;
+            background: #007bff;
+            color: #fff;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: background-color 0.3s ease;
+            margin-left: 10px;
+            padding: 0; /* Remove default padding */
+        }
+
+        .chat-input button img {
+            width: 60%;
+            height: 60%;
+            object-fit: contain;
+        }
+
+        .chat-input button:hover {
+            background-color: #0056b3;
+        }
+
+        /* "Thinking" Animation */
+        .typing-indicator {
+            display: none;
+            align-self: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .typing-indicator .dot {
+            height: 8px;
+            width: 8px;
+            margin: 0 2px;
+            background-color: #555;
+            border-radius: 50%;
+            display: inline-block;
+            animation: blink 1.4s infinite both;
+        }
+
+        .typing-indicator .dot:nth-child(1) {
+            animation-delay: 0s;
+        }
+
+        .typing-indicator .dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator .dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes blink {
+            0%, 80%, 100% {
+                opacity: 0;
+            }
+            40% {
+                opacity: 1;
+            }
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+
+</head>
+<body>
+    <div class="chat-widget-container">
+        <div class="chat-box" id="chatBox">
+            <div class="chat-header">
+                <h3>BibliBot</h3>
+                <button class="close-btn" id="closeBtn">&times;</button>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="typing-indicator" id="typingIndicator">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </div>
+            <div class="chat-input">
+                <textarea id="userInput" placeholder="Type your message..."></textarea>
+                <button id="sendBtn" aria-label="Send Message">
+                    <!-- Replace 'send-icon.png' with the path to your send button PNG -->
+                    <img src="/static/send_logo.png" />
+                </button>
+            </div>
+        </div>
+        <div class="chat-widget-icon" id="chatIcon">
+            <!-- Replace the src attribute with the correct path to your chatbot logo -->
+            <img src="/static/chatbot_logo.png"/>
+        </div>
+    </div>
+
+    <script>
+        // Get elements
+        const chatIcon = document.getElementById('chatIcon');
+        const chatBox = document.getElementById('chatBox');
+        const closeBtn = document.getElementById('closeBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const userInput = document.getElementById('userInput');
+        const chatMessages = document.getElementById('chatMessages');
+        const typingIndicator = document.getElementById('typingIndicator');
+
+        // Toggle chat box open
+        chatIcon.addEventListener('click', () => {
+            chatBox.style.display = 'flex';
+            chatIcon.style.display = 'none';
+            userInput.focus();
+        });
+
+        // Close chat box
+        closeBtn.addEventListener('click', () => {
+            chatBox.style.display = 'none';
+            chatIcon.style.display = 'flex';
+        });
+
+        // Handle sending messages
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        async function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            appendMessage("You", message, 'user');
+            userInput.value = '';
+            userInput.focus();
+
+            // Show typing indicator
+            showTypingIndicator();
+
+            try {
+                // Change the URL to your Flask backend endpoint
+                const response = await fetch('http://127.0.0.1:5001/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const data = await response.json();
+
+                // Hide typing indicator and show bot message
+                hideTypingIndicator();
+                appendMessage("BibliBot", data.answer, 'bot');
+            } catch (error) {
+                // Hide typing indicator and show error message
+                hideTypingIndicator();
+                appendMessage("BibliBot", "Sorry, something went wrong. Please try again later.", 'bot');
+                console.error('Error:', error);
+            }
+        }
+
+        // Function to convert URLs in text to clickable links
+        function linkify(text) {
+            const urlPattern = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            return text.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
+        }
+
+        // Function to append messages to the chat
+        function appendMessage(sender, text, type) {
+            const msgEl = document.createElement('div');
+            msgEl.classList.add('message', type);
+
+            // Split the text into paragraphs based on double newlines or other delimiters
+            // Assuming sources are separated by double newlines
+            const paragraphs = text.split(/\n{2,}/g).map(paragraph => paragraph.trim()).filter(paragraph => paragraph !== '');
+
+            // Process each paragraph to convert URLs to links
+            const processedParagraphs = paragraphs.map(paragraph => linkify(paragraph));
+
+            // Combine paragraphs with <p> tags for separation
+            const formattedText = processedParagraphs.map(paragraph => `<p>${paragraph}</p>`).join('');
+
+            msgEl.innerHTML = `<div class="message-text"><strong>${sender}:</strong> ${formattedText}</div>`;
+            chatMessages.appendChild(msgEl);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Function to show the typing indicator
+        function showTypingIndicator() {
+            typingIndicator.style.display = 'block';
+            // Scroll to bottom to show the typing indicator
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Function to hide the typing indicator
+        function hideTypingIndicator() {
+            typingIndicator.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
