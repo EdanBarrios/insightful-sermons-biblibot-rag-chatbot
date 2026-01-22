@@ -29,16 +29,17 @@ def is_sermon_question(question: str) -> bool:
     # Otherwise assume it's a real question
     return True
 
-def generate_answer(context: str, question: str) -> str:
+def generate_answer(context: str, question: str, sources: list[dict] = None) -> str:
     """
-    Generate answer using Groq's API with smart routing.
+    Generate SHORT answer with sermon references.
     
     Args:
-        context: Retrieved sermon chunks (may be empty)
+        context: Retrieved sermon chunks
         question: User's question
+        sources: List of dicts with 'title', 'url', 'category'
         
     Returns:
-        Generated answer
+        Brief answer with sermon links
     """
     
     if not client:
@@ -52,7 +53,7 @@ def generate_answer(context: str, question: str) -> str:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are BibliBot, a friendly assistant that helps people explore Biblical sermons and teachings. When greeted, respond warmly and invite them to ask questions about faith, sermons, or Biblical topics."
+                        "content": "You are BibliBot, a friendly assistant that helps people explore Biblical sermons. When greeted, respond warmly in 1-2 sentences and invite them to ask about faith topics."
                     },
                     {
                         "role": "user",
@@ -60,21 +61,19 @@ def generate_answer(context: str, question: str) -> str:
                     }
                 ],
                 temperature=0.8,
-                max_tokens=150
+                max_tokens=100
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
             logger.error(f"❌ Small talk error: {e}")
-            return "Hello! I'm BibliBot. I'm here to help you explore Biblical sermons and teachings. What would you like to know about?"
+            return "Hello! I'm BibliBot. Ask me about faith, grace, prayer, or any Biblical topic!"
     
     # Handle sermon questions with no context
     if not context.strip():
-        return "I couldn't find any relevant sermon content to answer that specific question. I can help you with topics like faith, grace, prayer, love, hope, and other Biblical teachings. Could you rephrase your question or try a different topic?"
+        return "I couldn't find any sermons about that topic. Try asking about faith, grace, prayer, love, hope, or other Biblical themes."
     
-    # Handle sermon questions with context (RAG mode)
-    prompt = f"""You are BibliBot, a helpful assistant answering questions about Biblical sermons.
-
-Use the following sermon excerpts to answer the question. Be conversational, clear, and faithful to the content.
+    # Handle sermon questions with context - STRICT SERMON-ONLY MODE
+    prompt = f"""You are BibliBot. Answer ONLY using information from these sermon excerpts. Do NOT add any information from your general knowledge.
 
 SERMON EXCERPTS:
 {context}
@@ -82,7 +81,13 @@ SERMON EXCERPTS:
 QUESTION:
 {question}
 
-ANSWER (be warm and helpful):"""
+CRITICAL RULES:
+- ONLY use information explicitly stated in the sermon excerpts above
+- If the excerpts don't contain enough information to answer, say "I don't have enough information in our sermons about that specific aspect"
+- Do NOT add general Biblical knowledge, personal interpretations, or information not in the excerpts
+- Keep answer to 2-3 sentences maximum
+- Be conversational but stay strictly within the sermon content
+- Do NOT mention sermon titles or URLs - those will be added separately"""
 
     try:
         response = client.chat.completions.create(
@@ -90,15 +95,15 @@ ANSWER (be warm and helpful):"""
             messages=[
                 {
                     "role": "system",
-                    "content": "You are BibliBot, a knowledgeable and warm assistant helping people understand Biblical sermons. Provide clear, helpful answers based on the sermon content provided. Be conversational but stay grounded in the sermons."
+                    "content": "You are BibliBot. You ONLY answer based on the sermon excerpts provided. Never use your general knowledge or add information not explicitly in the excerpts. If the excerpts don't answer the question, say so. Keep responses to 2-3 sentences."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.7,
-            max_tokens=400,
+            temperature=0.3,  # Lowered from 0.7 for more factual responses
+            max_tokens=150,
             top_p=0.9
         )
         
@@ -108,4 +113,4 @@ ANSWER (be warm and helpful):"""
         
     except Exception as e:
         logger.error(f"❌ LLM generation error: {e}")
-        return "I apologize, but I'm having trouble generating a response right now. Please try again in a moment."
+        return "I apologize, but I'm having trouble generating a response right now. Please try again."

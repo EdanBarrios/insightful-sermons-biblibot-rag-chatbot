@@ -3,8 +3,6 @@ import logging
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from dotenv import load_dotenv
-load_dotenv()
-
 from retrieval import retrieve
 from llm import generate_answer
 
@@ -14,6 +12,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
 logger.info("✅ Environment variables loaded")
 
 # Initialize Flask app
@@ -39,7 +40,7 @@ def chat():
     """
     Main chat endpoint.
     Expects: {"message": "user question"}
-    Returns: {"answer": "bot response"}
+    Returns: {"answer": "brief answer with sermon links"}
     """
     try:
         # Parse request
@@ -55,21 +56,64 @@ def chat():
         
         logger.info(f"📩 Received question: {question[:100]}...")
         
-        # Step 1: Retrieve relevant context
-        docs = retrieve(question, top_k=5)
+        # Step 1: Retrieve relevant context with metadata
+        from pinecone import Pinecone
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        index = pc.Index("sermon-index")
         
-        if not docs:
+        from embeddings import embed
+        vector = embed(question)
+        
+        res = index.query(
+            vector=vector,
+            top_k=3,  # Get top 3 most relevant
+            include_metadata=True
+        )
+        
+        # Check if results are actually relevant (score threshold)
+        if not res or "matches" not in res or not res["matches"]:
             logger.warning("No documents retrieved")
             return jsonify({
-                "answer": "I couldn't find any relevant sermon content to answer your question. Could you try rephrasing or asking about a different topic?"
+                "answer": "I couldn't find any sermons related to that topic. Try asking about faith, grace, prayer, love, or hope!"
             })
         
-        # Step 2: Build context string
-        context = "\n\n---\n\n".join(docs)
-        logger.info(f"📚 Context built: {len(context)} chars from {len(docs)} chunks")
+        # Filter by relevance score (only keep high-confidence matches)
+        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.3]
         
-        # Step 3: Generate answer
-        answer = generate_answer(context, question)
+        if not relevant_matches:
+            logger.warning("No sufficiently relevant matches found")
+            return jsonify({
+                "answer": "I don't have enough sermon content about that specific topic to give you a good answer. Try asking about faith, grace, prayer, love, hope, or other core Biblical topics."
+            })
+        
+        # Extract both text and metadata
+        context_chunks = []
+        sources = []
+        seen_urls = set()
+        
+        for match in relevant_matches:  # Use filtered matches
+            if "metadata" in match:
+                metadata = match["metadata"]
+                
+                # Add text for context
+                if "text" in metadata:
+                    context_chunks.append(metadata["text"])
+                
+                # Add unique sources
+                url = metadata.get("url", "")
+                if url and url not in seen_urls:
+                    sources.append({
+                        "title": metadata.get("title", "Sermon"),
+                        "url": url,
+                        "category": metadata.get("category", "General")
+                    })
+                    seen_urls.add(url)
+        
+        context = "\n\n---\n\n".join(context_chunks)
+        logger.info(f"📚 Context built: {len(context)} chars from {len(context_chunks)} chunks")
+        
+        # Step 2: Generate SHORT answer
+        answer = generate_answer(context, question, sources)
         
         if not answer:
             logger.error("Empty answer generated")
@@ -77,9 +121,29 @@ def chat():
                 "answer": "I'm sorry, I couldn't generate a proper response. Please try again."
             })
         
-        logger.info(f"✅ Answer generated successfully")
+        # Safety check: if LLM says it doesn't have info, respect that
+        no_info_phrases = [
+            "don't have enough information",
+            "not enough information",
+            "can't answer",
+            "don't know",
+            "not in the sermons",
+            "sermons don't mention"
+        ]
         
-        # Step 4: Return response (frontend only needs 'answer')
+        if any(phrase in answer.lower() for phrase in no_info_phrases):
+            # Don't add sermon links if we're saying we don't know
+            return jsonify({"answer": answer})
+        
+        # Step 3: Add sermon links to answer
+        if sources:
+            answer += "\n\n📖 **Learn more from these sermons:**"
+            for source in sources[:3]:  # Max 3 links
+                answer += f"\n• [{source['title']}]({source['url']})"
+        
+        logger.info(f"✅ Answer generated successfully with {len(sources)} sources")
+        
+        # Step 4: Return response
         return jsonify({
             "answer": answer
         })
