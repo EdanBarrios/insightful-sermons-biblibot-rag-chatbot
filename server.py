@@ -56,6 +56,13 @@ def chat():
         
         logger.info(f"📩 Received question: {question[:100]}...")
         
+        # Handle greetings BEFORE retrieval
+        greetings = ['hi', 'hello', 'hey', 'yo', 'sup', 'howdy', 'greetings', 'good morning', 'good afternoon', 'good evening']
+        if question.lower().strip() in greetings or len(question.split()) <= 2:
+            return jsonify({
+                "answer": "Hello! I'm BibliBot, here to help you explore our sermons. Ask me about faith, grace, prayer, love, hope, or any Biblical topic!"
+            })
+        
         # Step 1: Retrieve relevant context with metadata
         from pinecone import Pinecone
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
@@ -73,18 +80,18 @@ def chat():
         # Check if results are actually relevant (score threshold)
         if not res or "matches" not in res or not res["matches"]:
             logger.warning("No documents retrieved")
-            return jsonify({
-                "answer": "I couldn't find any sermons related to that topic. Try asking about faith, grace, prayer, love, or hope!"
-            })
+            # Still answer, but flag that we have no sermon content
+            answer = generate_answer("", question, has_sermon_content=False)
+            return jsonify({"answer": answer})
         
         # Filter by relevance score (only keep high-confidence matches)
-        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.3]
+        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.25]
         
         if not relevant_matches:
             logger.warning("No sufficiently relevant matches found")
-            return jsonify({
-                "answer": "I don't have enough sermon content about that specific topic to give you a good answer. Try asking about faith, grace, prayer, love, hope, or other core Biblical topics."
-            })
+            # Still answer, but flag that we have no relevant sermon content
+            answer = generate_answer("", question, has_sermon_content=False)
+            return jsonify({"answer": answer})
         
         # Extract both text and metadata
         context_chunks = []
@@ -112,8 +119,8 @@ def chat():
         context = "\n\n---\n\n".join(context_chunks)
         logger.info(f"📚 Context built: {len(context)} chars from {len(context_chunks)} chunks")
         
-        # Step 2: Generate SHORT answer
-        answer = generate_answer(context, question, sources)
+        # Step 2: Generate answer (with sermon content)
+        answer = generate_answer(context, question, has_sermon_content=True)
         
         if not answer:
             logger.error("Empty answer generated")
@@ -121,22 +128,18 @@ def chat():
                 "answer": "I'm sorry, I couldn't generate a proper response. Please try again."
             })
         
-        # Safety check: if LLM says it doesn't have info, respect that
-        no_info_phrases = [
-            "don't have enough information",
-            "not enough information",
-            "can't answer",
-            "don't know",
-            "not in the sermons",
-            "sermons don't mention"
+        # Check if this was a "no sermon content" answer
+        no_sermon_indicators = [
+            "don't have specific sermons",
+            "don't have sermons",
+            "no sermons about",
+            "sermons don't cover"
         ]
         
-        if any(phrase in answer.lower() for phrase in no_info_phrases):
-            # Don't add sermon links if we're saying we don't know
-            return jsonify({"answer": answer})
+        has_sermons = not any(indicator in answer.lower() for indicator in no_sermon_indicators)
         
-        # Step 3: Add sermon links to answer
-        if sources:
+        # Step 3: Add sermon links ONLY if we have relevant sermons
+        if has_sermons and sources:
             answer += "\n\n📖 **Learn more from these sermons:**"
             for source in sources[:3]:  # Max 3 links
                 answer += f"\n• [{source['title']}]({source['url']})"
