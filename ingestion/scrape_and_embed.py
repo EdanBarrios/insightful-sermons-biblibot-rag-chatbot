@@ -1,9 +1,9 @@
 """
 Fixed sermon scraper for insightfulsermons.com
-Handles stale element references properly.
+Saves correct category URLs that actually work.
 
 Usage:
-    python ingestion/scrape_and_embed_fixed.py
+    python ingestion/scrape_and_embed.py
 """
 
 import json
@@ -166,12 +166,9 @@ def scrape_sermons():
                         if not title:
                             continue
                         
-                        # Get URL
-                        try:
-                            link_elem = post.find_element(By.CSS_SELECTOR, 'a')
-                            href = link_elem.get_attribute('href')
-                        except:
-                            href = category_url
+                        # FIXED: Use the category URL (we know these work!)
+                        # This ensures links will be valid
+                        href = category_url
                         
                         # Get content
                         try:
@@ -185,7 +182,7 @@ def scrape_sermons():
                         if content and len(content) > 100:
                             articles[title] = {
                                 "content": content,
-                                "url": href,
+                                "url": href,  # Category URL (guaranteed to work)
                                 "category": category_name
                             }
                             logger.info(f"  ✅ Scraped: {title[:50]}...")
@@ -233,7 +230,7 @@ def embed_and_upsert(articles):
                 "metadata": {
                     "text": chunk,
                     "title": title,
-                    "url": url,
+                    "url": url,  # Now contains working category URL
                     "category": category,
                     "chunk_index": i,
                     "total_chunks": len(chunks)

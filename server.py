@@ -85,7 +85,7 @@ def chat():
             return jsonify({"answer": answer})
         
         # Filter by relevance score (only keep high-confidence matches)
-        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.25]
+        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.2]  # Lowered from 0.25
         
         if not relevant_matches:
             logger.warning("No sufficiently relevant matches found")
@@ -106,12 +106,12 @@ def chat():
                 if "text" in metadata:
                     context_chunks.append(metadata["text"])
                 
-                # Add unique sources
+                # Add unique sources with URLs from metadata
                 url = metadata.get("url", "")
                 if url and url not in seen_urls:
                     sources.append({
                         "title": metadata.get("title", "Sermon"),
-                        "url": url,
+                        "url": url,  # Use the URL stored in Pinecone
                         "category": metadata.get("category", "General")
                     })
                     seen_urls.add(url)
@@ -128,21 +128,18 @@ def chat():
                 "answer": "I'm sorry, I couldn't generate a proper response. Please try again."
             })
         
-        # Check if this was a "no sermon content" answer
-        no_sermon_indicators = [
-            "don't have specific sermons",
-            "don't have sermons",
-            "no sermons about",
-            "sermons don't cover"
-        ]
+        # Check if we refused to answer (no sermon content)
+        if "don't have any sermons" in answer.lower() or "don't have sermons" in answer.lower():
+            # No sermon content - just return the refusal message
+            return jsonify({"answer": answer})
         
-        has_sermons = not any(indicator in answer.lower() for indicator in no_sermon_indicators)
-        
-        # Step 3: Add sermon links ONLY if we have relevant sermons
-        if has_sermons and sources:
-            answer += "\n\n📖 **Learn more from these sermons:**"
+        # Step 3: Add sermon links (we only get here if we have content)
+        if sources:
+            answer += "\n\n📖 **Explore more on these topics:**"
+            
+            # Use unique sources (each has the category URL)
             for source in sources[:3]:  # Max 3 links
-                answer += f"\n• [{source['title']}]({source['url']})"
+                answer += f"\n• [{source['category']}]({source['url']})"
         
         logger.info(f"✅ Answer generated successfully with {len(sources)} sources")
         

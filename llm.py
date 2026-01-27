@@ -68,42 +68,9 @@ def generate_answer(context: str, question: str, has_sermon_content: bool = True
             logger.error(f"❌ Small talk error: {e}")
             return "Hello! I'm BibliBot. Ask me about faith, grace, prayer, or any Biblical topic!"
     
-    # Handle questions WITHOUT sermon content - still answer!
+    # Handle questions WITHOUT sermon content - REFUSE to answer
     if not has_sermon_content or not context.strip():
-        prompt = f"""You are BibliBot, a Biblical knowledge assistant.
-
-QUESTION: {question}
-
-The user asked about something we don't have specific sermons on. However, provide a helpful, brief Biblical answer (2-3 sentences) drawing from general Biblical knowledge.
-
-Start your answer by acknowledging: "I don't have specific sermons about this topic, but I can share..."
-
-Then provide a concise, helpful answer."""
-
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are BibliBot. When sermons don't cover a topic, acknowledge it but still provide helpful Biblical information in 2-3 sentences."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.5,
-                max_tokens=200
-            )
-            
-            answer = response.choices[0].message.content.strip()
-            logger.info(f"✅ Generated answer (no sermons): {answer[:100]}...")
-            return answer
-            
-        except Exception as e:
-            logger.error(f"❌ LLM generation error: {e}")
-            return "I don't have specific sermons about that topic, and I'm having trouble generating a response right now. Please try again."
+        return "I don't have any sermons that cover this topic. Try asking about faith, grace, prayer, love, hope, or other Biblical themes from our sermon library."
     
     # Handle questions WITH sermon content - use sermons!
     prompt = f"""You are BibliBot. Answer based on these sermon excerpts.
