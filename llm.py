@@ -72,16 +72,17 @@ def generate_answer(context: str, question: str, has_sermon_content: bool = True
     if not has_sermon_content or not context.strip():
         return "I don't have any sermons that cover this topic. Try asking about faith, grace, prayer, love, hope, or other Biblical themes from our sermon library."
     
+    # FIX #4: Changed "SERMON EXCERPTS" to "SERMON SUMMARIES"
     # Handle questions WITH sermon content - use sermons!
-    prompt = f"""You are BibliBot. Answer based on these sermon excerpts.
+    prompt = f"""You are BibliBot. Answer based on these sermon summaries.
 
-SERMON EXCERPTS:
+SERMON SUMMARIES:
 {context}
 
 QUESTION:
 {question}
 
-Provide a brief answer (2-3 sentences) using ONLY the information in the sermon excerpts above. Be conversational but stay strictly within the sermon content."""
+Provide a brief answer (2-3 sentences) using ONLY the information in the sermon summaries above. Be conversational but stay strictly within the sermon content."""
 
     try:
         response = client.chat.completions.create(

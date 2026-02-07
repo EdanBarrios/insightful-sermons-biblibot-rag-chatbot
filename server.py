@@ -58,7 +58,9 @@ def chat():
         
         # Handle greetings BEFORE retrieval
         greetings = ['hi', 'hello', 'hey', 'yo', 'sup', 'howdy', 'greetings', 'good morning', 'good afternoon', 'good evening']
-        if question.lower().strip() in greetings or len(question.split()) <= 2:
+        
+        # FIX #3: Changed from <= 2 to == 1 (only single words trigger greeting)
+        if question.lower().strip() in greetings or len(question.split()) == 1:
             return jsonify({
                 "answer": "Hello! I'm BibliBot, here to help you explore our sermons. Ask me about faith, grace, prayer, love, hope, or any Biblical topic!"
             })
@@ -133,15 +135,17 @@ def chat():
             # No sermon content - just return the refusal message
             return jsonify({"answer": answer})
         
-        # Step 3: Add sermon links (we only get here if we have content)
+        # FIX #5 & #6: Changed from 3 category bullets to 1 URL + 1 category
         if sources:
-            answer += "\n\n📖 **Explore more on these topics:**"
-            
-            # Use unique sources (each has the category URL)
-            for source in sources[:3]:  # Max 3 links
-                answer += f"\n• [{source['category']}]({source['url']})"
+            # Get most relevant source (first one from retrieval)
+            primary_source = sources[0]
+            answer += f"\n\n📖 **Explore more:** [{primary_source['category']}]({primary_source['url']})"
+        else:
+            # FIX #6: Fallback - ensure we always have a link if we have sermon content
+            logger.warning("⚠️ No specific sources found, but sermon content was used")
+            answer += "\n\n📖 **Explore our sermon library:** [Browse all sermons](https://www.insightfulsermons.com/)"
         
-        logger.info(f"✅ Answer generated successfully with {len(sources)} sources")
+        logger.info(f"✅ Answer generated successfully with links")
         
         # Step 4: Return response
         return jsonify({
