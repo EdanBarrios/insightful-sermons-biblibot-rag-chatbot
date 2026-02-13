@@ -3,7 +3,7 @@ Upload existing sermon_data.json to Pinecone
 No scraping needed - just embeds and uploads your existing data.
 
 Usage:
-    python ingestion/upload_existing_data.py
+    python ingestion/upload_data.py
 """
 
 import json

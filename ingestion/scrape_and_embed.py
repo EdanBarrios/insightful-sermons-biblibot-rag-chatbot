@@ -1,7 +1,8 @@
 """
-Fixed sermon scraper for insightfulsermons.com
-Scrapes INDIVIDUAL SERMONS from each category page using Selenium.
-Runs daily via GitHub Actions.
+Daily sermon scraper for insightfulsermons.com
+Automatically detects and uploads NEW sermons that haven't been indexed yet.
+
+Runs daily via GitHub Actions to keep Pinecone in sync with the website.
 
 Usage:
     python ingestion/scrape_and_embed.py
@@ -24,34 +25,39 @@ from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 
-# Setup logging
+
+# ----------------------------
+# Logging
+# ----------------------------
 log_dir = Path(__file__).parent
 log_dir.mkdir(exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler(log_dir / 'ingestion.log'),
-        logging.StreamHandler()
-    ]
+        logging.FileHandler(log_dir / "ingestion.log"),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 
-# Load environment
+# ----------------------------
+# Env / constants
+# ----------------------------
 load_dotenv()
 
-# Constants
 BASE_URL = "https://www.insightfulsermons.com"
-CATEGORIES_URL = f"{BASE_URL}/"
+CATEGORIES_URL = f"{BASE_URL}/categories.html"
 DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-# Initialize services
+
+# ----------------------------
+# Services
+# ----------------------------
 try:
     pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
     index = pc.Index("sermon-index")
@@ -61,294 +67,478 @@ except Exception as e:
     logger.error(f"❌ Initialization failed: {e}")
     sys.exit(1)
 
-# Cleaning utilities
-def remove_non_ascii(text):
-    return re.sub(r'[^\x00-\x7F]+', '', text)
 
-def clean_content(content):
-    """Clean sermon content"""
-    bible_books = "Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|1 Samuel|2 Samuel|1 Kings|2 Kings|1 Chronicles|2 Chronicles|Ezra|Nehemiah|Esther|Job|Psalms|Proverbs|Ecclesiastes|Song of Solomon|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|1 Corinthians|2 Corinthians|Galatians|Ephesians|Philippians|Colossians|1 Thessalonians|2 Thessalonians|1 Timothy|2 Timothy|Titus|Philemon|Hebrews|James|1 Peter|2 Peter|1 John|2 John|3 John|Jude|Revelation"
-    
-    content = re.sub(r'\b(' + bible_books + r')\s+\d+[:]?\d*(-\d+)?', '', content)
-    content = re.sub(r'\d+', '', content)
-    content = re.sub(r'\[.*?\]', '', content)
-    content = re.sub(r'\(.*?\)', '', content)
-    content = re.sub(r'[:;,\-]', '', content)
-    content = re.sub(r'^(.*?\bSummary\b)', '', content, flags=re.IGNORECASE)
-    content = re.sub(r'\b(Summary|Summarized).*$', '', content, flags=re.IGNORECASE | re.DOTALL)
-    content = re.sub(r'\s+', ' ', content).strip()
+def remove_non_ascii(text: str) -> str:
+    """Remove non-ASCII characters"""
+    return re.sub(r"[^\x00-\x7F]+", "", text or "")
+
+
+def clean_content(content: str) -> str:
+    """
+    Clean sermon content for embeddings/search.
+    Keep meaning; avoid aggressive deletion that can wipe sermons.
+    """
+    if not content:
+        return ""
+
+    # Remove bracketed footnotes / junk
+    content = re.sub(r"\[.*?\]", " ", content)
+
+    # Remove ONLY a leading Summary/Summarized label (not the whole rest)
+    content = re.sub(r"^\s*(summary|summarized)\s*:?\s*", "", content, flags=re.IGNORECASE)
+
+    # Normalize whitespace
+    content = re.sub(r"\s+", " ", content).strip()
     return content
 
-def generate_doc_id(title, url):
-    """Generate stable document ID"""
-    combined = f"{title}|{url}"
-    return hashlib.md5(combined.encode()).hexdigest()
 
-def chunk_text(text, chunk_size=500, overlap=50):
-    """Split text into overlapping chunks"""
-    words = text.split()
-    chunks = []
-    
-    for i in range(0, len(words), chunk_size - overlap):
-        chunk = ' '.join(words[i:i + chunk_size])
+def generate_doc_id(url: str):
+    return hashlib.md5(url.encode()).hexdigest()
+
+
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
+    """Split text into overlapping chunks (word-based)"""
+    words = (text or "").split()
+    chunks: list[str] = []
+    if not words:
+        return chunks
+
+    step = max(1, chunk_size - overlap)
+    for i in range(0, len(words), step):
+        chunk = " ".join(words[i : i + chunk_size]).strip()
         if chunk:
             chunks.append(chunk)
-    
     return chunks
 
-def scrape_sermons():
-    """Scrape individual sermons from category pages"""
+
+def load_existing_sermons(json_file: str) -> dict:
+    """Load existing sermon URLs from local JSON"""
+    try:
+        if not os.path.exists(json_file):
+            return {}
+        with open(json_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not load existing sermons: {e}")
+        return {}
+
+
+def save_sermons(sermon_data: dict, json_file: str) -> None:
+    """Save sermon data to JSON file"""
+    try:
+        with open(json_file, "w", encoding="utf-8") as f:
+            json.dump(sermon_data, f, ensure_ascii=False, indent=4)
+        logger.info(f"💾 Saved {len(sermon_data)} sermons to {json_file}")
+    except Exception as e:
+        logger.error(f"Error saving sermons: {e}")
+
+
+def get_link_text(element, url: str) -> str:
+    """Extract text from link - fallback to URL if text is empty"""
+    try:
+        title_span = element.find_element(By.CSS_SELECTOR, ".wsite-menu-title")
+        text = title_span.text.strip()
+        if text:
+            return text
+    except Exception:
+        pass
+
+    if url:
+        name = url.replace("https://www.insightfulsermons.com/", "").replace(".html", "")
+        name = name.replace("-", " ").title()
+        return name
+
+    return ""
+
+
+def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
+    """
+    Scrape sermons from the website.
+
+    IMPORTANT: Every page on this site renders the full left-nav menu (hundreds of links).
+    Fix approach:
+      - Only treat /categories.html as the source of CATEGORY links.
+      - For each category page, only collect SERMON links that are children of that category
+        in the nav hierarchy (not the entire site menu).
+      - Deduplicate by URL and never follow links discovered on sermon pages.
+      - Extract sermon body from #wsite-content div.paragraph (Weebly layout).
+    """
     logger.info("🔄 Starting sermon scraping...")
-    
-    # Setup Chrome
+
+    existing_sermons = existing_sermons or {}
+    existing_urls = {
+        v.get("url")
+        for v in existing_sermons.values()
+        if isinstance(v, dict) and v.get("url")
+    }
+
+    visited_sermon_urls: set[str] = set()
+
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-    
+    chrome_options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    )
+
     try:
         driver = webdriver.Chrome(options=chrome_options)
     except Exception as e:
-        logger.warning(f"Headless Chrome failed, trying normal mode: {e}")
-        try:
-            driver = webdriver.Chrome()
-        except Exception as e2:
-            logger.error(f"❌ Could not initialize Chrome: {e2}")
-            sys.exit(1)
-    
-    articles = {}
-    
-    try:
-        # Go to home page to get categories
-        logger.info(f"Loading home page: {CATEGORIES_URL}")
-        driver.get(CATEGORIES_URL)
-        time.sleep(3)
-        
-        # Find all category links in the menu
-        try:
-            # Look for menu items with sermon category links
-            category_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='.html'][class*='menu']")
-            if not category_links:
-                category_links = driver.find_elements(By.CSS_SELECTOR, "a[href$='.html']")
-        except:
-            logger.warning("Could not find category links, trying alternative selector")
-            category_links = driver.find_elements(By.CSS_SELECTOR, "a[href]")
-        
-        # Extract category URLs and names before looping (avoid stale elements)
-        category_data = []
-        for link in category_links:
+        logger.error(f"❌ Could not initialize Chrome: {e}")
+        sys.exit(1)
+
+    def _abs_url(href: str) -> str:
+        if not href:
+            return ""
+        href = href.strip()
+
+        # Normalize /home/ prefix
+        href = href.replace("/home/", "/")
+        href = href.replace("https://www.insightfulsermons.com/home/", "https://www.insightfulsermons.com/")
+        href = href.replace("http://www.insightfulsermons.com/home/", "http://www.insightfulsermons.com/")
+
+        if href.startswith("/"):
+            return BASE_URL + href
+        if href.startswith("http://") or href.startswith("https://"):
+            return href
+        if href.endswith(".html"):
+            return f"{BASE_URL}/{href.lstrip('/')}"
+        return href
+
+
+    def _get_sermon_title() -> str:
+        """Try several in-page selectors for a sermon title."""
+        for css in ["h1", "h2", ".wsite-content-title", ".wsite-section-title"]:
             try:
-                url = link.get_attribute('href')
-                name = link.text.strip()
-                
-                # Filter for actual category pages (not images, not nav items, etc)
-                if url and name and len(name) > 2 and url.endswith('.html') and not url.startswith('javascript'):
-                    if url.startswith('/'):
-                        url = BASE_URL + url
-                    if url not in [c[0] for c in category_data]:  # Avoid duplicates
-                        category_data.append((url, name))
-                        logger.info(f"  Found category: {name} -> {url}")
-            except:
-                pass
-        
-        logger.info(f"Found {len(category_data)} categories")
-        
-        # Now scrape each category's sermons
-        for category_url, category_name in category_data:
-            try:
-                logger.info(f"\n📂 Scraping category: {category_name}")
-                logger.info(f"   URL: {category_url}")
-                
-                driver.get(category_url)
-                time.sleep(2)
-                
-                # Find all sermon links on this category page
-                # Look for menu subitems which are individual sermons
-                sermon_links = []
-                
-                # Try multiple selectors to find sermon links
-                for selector in [
-                    "a[href$='.html'][class*='menu-subitem']",  # Menu items
-                    "a[href*='/'][class*='sermon']",  # Sermon pages
-                    "li a[href$='.html']",  # List items
-                    "a[href$='.html']"  # Any .html link
-                ]:
-                    try:
-                        found = driver.find_elements(By.CSS_SELECTOR, selector)
-                        if found:
-                            logger.info(f"   Found {len(found)} links with selector: {selector}")
-                            for elem in found:
-                                href = elem.get_attribute('href')
-                                text = elem.text.strip()
-                                if href and text and len(text) > 3 and href.endswith('.html'):
-                                    if href.startswith('/'):
-                                        href = BASE_URL + href
-                                    sermon_links.append((href, text))
-                            break
-                    except:
-                        pass
-                
-                # Remove duplicates while preserving order
-                seen = set()
-                unique_sermons = []
-                for href, text in sermon_links:
-                    if href not in seen:
-                        seen.add(href)
-                        unique_sermons.append((href, text))
-                
-                logger.info(f"   Got {len(unique_sermons)} unique sermons")
-                
-                # Now scrape content from each sermon
-                for sermon_url, sermon_title in unique_sermons:
-                    try:
-                        logger.info(f"     Scraping: {sermon_title[:40]}...")
-                        
-                        driver.get(sermon_url)
-                        time.sleep(1)
-                        
-                        # Get page content
-                        try:
-                            # Look for paragraph/content elements
-                            paragraphs = driver.find_elements(By.CSS_SELECTOR, 'p, .paragraph, .content, article p')
-                            content = " ".join([remove_non_ascii(p.text) for p in paragraphs if p.text.strip()])
-                        except:
-                            content = ""
-                        
-                        if not content:
-                            # Fallback: get all text from body
-                            try:
-                                body = driver.find_element(By.TAG_NAME, 'body')
-                                content = remove_non_ascii(body.text)
-                            except:
-                                content = ""
-                        
-                        content = clean_content(content)
-                        
-                        # Store if we got meaningful content
-                        if content and len(content) > 100:
-                            articles[sermon_title] = {
-                                "content": content,
-                                "url": sermon_url,
-                                "category": category_name
-                            }
-                            logger.info(f"       ✅ Stored: {sermon_title[:40]}...")
-                        else:
-                            logger.warning(f"       ⚠️  Content too short for: {sermon_title[:40]}...")
-                    
-                    except Exception as e:
-                        logger.warning(f"       ❌ Error scraping sermon: {e}")
-                        continue
-            
-            except Exception as e:
-                logger.error(f"   ❌ Error scraping category {category_name}: {e}")
+                el = driver.find_element(By.CSS_SELECTOR, css)
+                t = (el.text or "").strip()
+                if t and len(t) > 2:
+                    return t
+            except Exception:
                 continue
-        
-        logger.info(f"\n✅ Scraping complete! Got {len(articles)} sermons")
-        
+        return ""
+
+    def _get_main_text() -> str:
+        """
+        Weebly pages store real text in div.paragraph blocks under #wsite-content.
+        Pull those first (best signal, avoids menu junk).
+        """
+        try:
+            content_root = driver.find_element(By.ID, "wsite-content")
+
+            paras = content_root.find_elements(By.CSS_SELECTOR, "div.paragraph")
+            parts = [p.text.strip() for p in paras if p.text and p.text.strip()]
+            if parts:
+                return "\n\n".join(parts).strip()
+
+            # Secondary: sometimes content is in wsite-elements without div.paragraph
+            els = content_root.find_elements(By.CSS_SELECTOR, ".wsite-elements, .wsite-section-elements")
+            parts = [e.text.strip() for e in els if e.text and e.text.strip()]
+            txt = "\n\n".join(parts).strip()
+            if txt:
+                return txt
+
+            return (content_root.text or "").strip()
+        except Exception:
+            return ""
+
+    all_sermons: dict[str, dict] = {}
+
+    try:
+        # Step 1: Load /categories.html and collect CATEGORY links only.
+        logger.info(f"📂 Loading categories page: {CATEGORIES_URL}")
+        driver.get(CATEGORIES_URL)
+        time.sleep(1.5)
+
+        category_els = driver.find_elements(
+            By.XPATH,
+            "//a[contains(@class,'wsite-menu-subitem') and .//span[contains(@class,'wsite-menu-arrow')]]",
+        )
+
+        category_links: list[tuple[str, str]] = []
+        for el in category_els:
+            href = _abs_url(el.get_attribute("href"))
+            title = get_link_text(el, href)
+            if href and href.endswith(".html") and href != CATEGORIES_URL:
+                category_links.append((href, title))
+
+        # De-dupe categories by URL (some templates duplicate nav items)
+        seen_cat: set[str] = set()
+        category_links = [(u, t) for (u, t) in category_links if u not in seen_cat and not seen_cat.add(u)]
+
+        logger.info(f"✅ Found {len(category_links)} category links")
+        category_url_set = {u for (u, _) in category_links}
+
+        # Step 2: For each category page, collect ONLY the sermon links that are children of that category.
+        sermon_links: list[tuple[str, str, str]] = []  # (sermon_url, sermon_title, category_title)
+
+        for cat_url, cat_title in category_links:
+            try:
+                driver.get(cat_url)
+                time.sleep(0.9)
+
+                # Find the nav anchor that matches this category, then pull its descendant sermon items.
+                cat_anchor = None
+                try:
+                    cat_anchor = driver.find_element(
+                        By.XPATH,
+                        f"//a[contains(@class,'wsite-menu-subitem') and @href='{cat_url}']",
+                    )
+                except Exception:
+                    rel = cat_url.replace(BASE_URL, "")
+                    try:
+                        cat_anchor = driver.find_element(
+                            By.XPATH,
+                            f"//a[contains(@class,'wsite-menu-subitem') and @href='{rel}']",
+                        )
+                    except Exception:
+                        cat_anchor = None
+
+                sermon_anchors = []
+                if cat_anchor is not None:
+                    try:
+                        li = cat_anchor.find_element(By.XPATH, "./ancestor::li[1]")
+                        sermon_anchors = li.find_elements(
+                            By.XPATH,
+                            ".//a[contains(@class,'wsite-menu-subitem') and not(.//span[contains(@class,'wsite-menu-arrow')])]",
+                        )
+                    except Exception:
+                        sermon_anchors = []
+
+                # Fallback (filtered): only take in-content links that are not categories/util pages
+                if not sermon_anchors:
+                    candidates = driver.find_elements(By.CSS_SELECTOR, "#wsite-content a[href$='.html']")
+                    for a in candidates:
+                        href = _abs_url(a.get_attribute("href"))
+                        if not href or not href.endswith(".html"):
+                            continue
+                        if href in category_url_set:
+                            continue
+                        if href == CATEGORIES_URL or href == cat_url:
+                            continue
+                        if href.endswith("/categories.html"):
+                            continue
+
+                        stitle = (get_link_text(a, href) or "").strip()
+                        if not stitle or len(stitle) < 3:
+                            continue
+
+                        sermon_anchors.append(a)
+
+                for a in sermon_anchors:
+                    href = _abs_url(a.get_attribute("href"))
+                    if not href or not href.endswith(".html"):
+                        continue
+                    if href == CATEGORIES_URL or href == cat_url:
+                        continue
+                    if href.endswith("/categories.html"):
+                        continue
+                    if href in category_url_set:
+                        continue
+
+                    stitle = (get_link_text(a, href) or "").strip()
+                    if not stitle or len(stitle) < 2:
+                        continue
+
+                    sermon_links.append((href, stitle, cat_title or "General"))
+
+            except Exception as e:
+                logger.warning(f"Error reading category {cat_title} ({cat_url}): {e}")
+                continue
+
+        # De-dupe sermon URLs globally
+        seen_ser: set[str] = set()
+        sermon_links = [(u, t, c) for (u, t, c) in sermon_links if u not in seen_ser and not seen_ser.add(u)]
+
+        logger.info(f"✅ Collected {len(sermon_links)} unique sermon links across categories")
+
+        # Step 3: Visit each sermon once and scrape main content.
+        skipped_existing = 0
+        scraped = 0
+
+        for sermon_url, sermon_title, cat_title in sermon_links:
+            if sermon_url in visited_sermon_urls:
+                continue
+            visited_sermon_urls.add(sermon_url)
+
+            if sermon_url in existing_urls:
+                skipped_existing += 1
+                continue
+
+            logger.info(f"📖 Scraping sermon: {sermon_title[:80]} ({cat_title})")
+
+            try:
+                driver.get(sermon_url)
+                time.sleep(0.7)
+
+                page_title = _get_sermon_title()
+                final_title = page_title or sermon_title
+
+                raw_content = _get_main_text()
+                raw_content = remove_non_ascii(raw_content)
+                content = clean_content(raw_content)
+
+                if not content or len(content) < 200:
+                    logger.warning(
+                        f"  ⚠️ Content too short (raw={len(raw_content)} cleaned={len(content)}) - skipping - {sermon_url}"
+                    )
+                    logger.warning(f"  RAW SNIP: {raw_content[:160]!r}")
+                    continue
+
+                key = final_title
+                if key in all_sermons and all_sermons[key].get("url") != sermon_url:
+                    key = f"{final_title} ({sermon_url.rsplit('/', 1)[-1].replace('.html','')})"
+
+                all_sermons[key] = {
+                    "content": content,
+                    "url": sermon_url,
+                    "category": cat_title or "General",
+                }
+                scraped += 1
+                logger.info("  ✅ Stored")
+
+            except Exception as e:
+                logger.warning(f"Error scraping sermon {sermon_title} ({sermon_url}): {e}")
+                continue
+
+        logger.info("=" * 60)
+        logger.info("✅ Scraping complete!")
+        logger.info(f"   Skipped existing (by URL): {skipped_existing}")
+        logger.info(f"   New sermons scraped: {scraped}")
+        logger.info(f"   Total sermons collected this run: {len(all_sermons)}")
+        logger.info("=" * 60)
+
     except Exception as e:
         logger.error(f"❌ Scraping failed: {e}")
         import traceback
-        traceback.print_exc()
-    
-    finally:
-        driver.quit()
-    
-    return articles
 
-def embed_and_upsert(articles):
-    """Embed sermon chunks and upsert to Pinecone"""
-    logger.info("📊 Embedding and upserting to Pinecone...")
-    
-    vectors = []
-    
-    for title, article in articles.items():
+        traceback.print_exc()
+    finally:
         try:
-            content = article['content']
-            url = article['url']
-            category = article['category']
-            
+            driver.quit()
+        except Exception:
+            pass
+
+    return all_sermons
+
+
+def embed_and_upsert(sermon_data: dict[str, dict]) -> bool:
+    """Embed sermon chunks and upsert to Pinecone"""
+    logger.info(f"📊 Embedding and upserting {len(sermon_data)} sermons...")
+
+    vectors: list[dict] = []
+
+    for title, sermon in sermon_data.items():
+        try:
+            content = sermon.get("content", "")
+            url = sermon.get("url", "")
+            category = sermon.get("category", "General")
+
+            if not content or len(content) < 50:
+                logger.debug(f"Skipping {title} - content too short")
+                continue
+
             chunks = chunk_text(content)
-            
+
             for i, chunk in enumerate(chunks):
-                doc_id = f"{generate_doc_id(title, url)}_chunk_{i}"
+                doc_id = f"{generate_doc_id(url)}_chunk_{i}"
                 embedding = embedder.encode(chunk).tolist()
-                
-                vectors.append({
-                    "id": doc_id,
-                    "values": embedding,
-                    "metadata": {
-                        "text": chunk,
-                        "title": title,
-                        "url": url,
-                        "category": category,
-                        "chunk_index": i,
-                        "total_chunks": len(chunks)
+
+                vectors.append(
+                    {
+                        "id": doc_id,
+                        "values": embedding,
+                        "metadata": {
+                            "text": chunk,
+                            "title": title,
+                            "url": url,
+                            "category": category,
+                            "chunk_index": i,
+                            "total_chunks": len(chunks),
+                        },
                     }
-                })
+                )
         except Exception as e:
             logger.warning(f"Error processing {title}: {e}")
             continue
-    
-    logger.info(f"Created {len(vectors)} vectors from {len(articles)} sermons")
-    
+
+    logger.info(f"Created {len(vectors)} vectors")
+
     if not vectors:
         logger.warning("⚠️ No vectors to upload!")
-        return
-    
-    # Upsert in batches
+        return False
+
     batch_size = 100
     for i in range(0, len(vectors), batch_size):
-        batch = vectors[i:i + batch_size]
+        batch = vectors[i : i + batch_size]
         try:
             index.upsert(vectors=batch)
-            logger.info(f"Upserted batch {i//batch_size + 1}/{(len(vectors)-1)//batch_size + 1}")
+            progress = f"{min(i + batch_size, len(vectors))}/{len(vectors)}"
+            logger.info(f"Batch {i//batch_size + 1}: Upserted {progress} vectors")
         except Exception as e:
             logger.error(f"Error upserting batch: {e}")
-    
-    logger.info("✅ All vectors upserted")
+            return False
 
-def main():
+    try:
+        stats = index.describe_index_stats()
+        total_vectors = stats.get("total_vector_count", 0)
+        logger.info(f"✅ Total vectors in Pinecone: {total_vectors}")
+    except Exception:
+        pass
+
+    return True
+
+
+def main() -> None:
     """Main ingestion pipeline"""
     logger.info("=" * 60)
-    logger.info(f"Starting ingestion at {datetime.now()}")
+    logger.info(f"Starting daily ingestion at {datetime.now()}")
     logger.info("=" * 60)
-    
-    try:
-        articles = scrape_sermons()
-        
-        if not articles:
-            logger.warning("⚠️ No articles scraped")
-            return
-        
-        # Save raw data
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        data_file = DATA_DIR / f"sermon_data_{timestamp}.json"
-        
-        with open(data_file, 'w', encoding='utf-8') as f:
-            json.dump(articles, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"💾 Saved raw data to {data_file}")
-        
-        # Embed and upsert
-        embed_and_upsert(articles)
-        
-        # Final stats
-        try:
-            stats = index.describe_index_stats()
-            total_vectors = stats.get('total_vector_count', 0)
-            logger.info(f"📊 Total vectors in Pinecone: {total_vectors}")
-        except:
-            pass
-        
-        logger.info("=" * 60)
-        logger.info("✅ Ingestion complete!")
-        logger.info("=" * 60)
-        
-    except Exception as e:
-        logger.error(f"❌ Ingestion failed: {e}", exc_info=True)
+
+    json_file = DATA_DIR / "sermon_data.json"
+
+    existing_sermons = load_existing_sermons(str(json_file))
+    logger.info(f"Loaded {len(existing_sermons)} existing sermons\n")
+
+    current_sermons = scrape_sermons(existing_sermons)
+
+    if not current_sermons:
+        logger.error("❌ No sermons scraped from website!")
         sys.exit(1)
+
+    new_sermons = {}
+    updated_sermons = {}
+
+    for title, sermon_data in current_sermons.items():
+        if title not in existing_sermons:
+            new_sermons[title] = sermon_data
+        else:
+            if sermon_data["url"] != existing_sermons[title].get("url"):
+                updated_sermons[title] = sermon_data
+
+    logger.info("\n📊 Sync Summary:")
+    logger.info(f"   Existing sermons in file: {len(existing_sermons)}")
+    logger.info(f"   Current on website: {len(current_sermons)}")
+    logger.info(f"   New sermons: {len(new_sermons)}")
+    logger.info(f"   Updated sermons: {len(updated_sermons)}")
+
+    save_sermons(current_sermons, str(json_file))
+
+    logger.info("\n📤 Uploading to Pinecone...")
+    success = embed_and_upsert(current_sermons)
+
+    if success:
+        logger.info("=" * 60)
+        logger.info("✅ Daily ingestion complete!")
+        logger.info("=" * 60)
+    else:
+        logger.error("=" * 60)
+        logger.error("❌ Daily ingestion failed!")
+        logger.error("=" * 60)
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
