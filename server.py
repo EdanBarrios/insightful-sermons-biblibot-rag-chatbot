@@ -135,15 +135,15 @@ def chat():
             # No sermon content - just return the refusal message
             return jsonify({"answer": answer})
         
-        # FIX #5 & #6: Changed from 3 category bullets to 1 URL + 1 category
+         # FIX #5 & #6: Changed from 3 category bullets to 1 URL + 1 category
         if sources:
             # Get most relevant source (first one from retrieval)
             primary_source = sources[0]
-            answer += f"\n\n📖 **Explore more:** [{primary_source['category']}]({primary_source['url']})"
+            answer += f"\n\nHere's a sermon related to your question!\n\n📖 [{primary_source['title']}]({primary_source['url']})"
         else:
             # FIX #6: Fallback - ensure we always have a link if we have sermon content
             logger.warning("⚠️ No specific sources found, but sermon content was used")
-            answer += "\n\n📖 **Explore our sermon library:** [Browse all sermons](https://www.insightfulsermons.com/)"
+            answer += "\n\nHere's a sermon related to your question!\n\n📖 [Browse all sermons](https://www.insightfulsermons.com/)"
         
         logger.info(f"✅ Answer generated successfully with links")
         
