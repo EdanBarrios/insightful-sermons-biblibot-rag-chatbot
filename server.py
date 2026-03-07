@@ -87,7 +87,7 @@ def chat():
             return jsonify({"answer": answer})
         
         # Filter by relevance score (only keep high-confidence matches)
-        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.2]  # Lowered from 0.25
+        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.4]  # Lowered from 0.25
         
         if not relevant_matches:
             logger.warning("No sufficiently relevant matches found")
