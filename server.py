@@ -114,8 +114,9 @@ def chat():
                 if url and url not in seen_urls:
                     sources.append({
                         "title": metadata.get("title", "Sermon"),
-                        "url": url,  # Use the URL stored in Pinecone
-                        "category": metadata.get("category", "General")
+                        "url": url,
+                        "category": metadata.get("category", "General"),
+                        "content": metadata.get("text", "")  # Store content for original link extraction
                     })
                     seen_urls.add(url)
         
