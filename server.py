@@ -3,6 +3,7 @@ import logging
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from dotenv import load_dotenv
+from sympy import re
 from retrieval import retrieve
 from llm import generate_answer
 
@@ -87,7 +88,7 @@ def chat():
             return jsonify({"answer": answer})
         
         # Filter by relevance score (only keep high-confidence matches)
-        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.4]  # Lowered from 0.25
+        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.2]  # Lowered from 0.25
         
         if not relevant_matches:
             logger.warning("No sufficiently relevant matches found")
@@ -135,11 +136,22 @@ def chat():
             # No sermon content - just return the refusal message
             return jsonify({"answer": answer})
         
-         # FIX #5 & #6: Changed from 3 category bullets to 1 URL + 1 category
         if sources:
             # Get most relevant source (first one from retrieval)
             primary_source = sources[0]
             answer += f"\n\nHere's a sermon related to your question!\n\n📖 [{primary_source['title']}]({primary_source['url']})"
+            
+            # Look for URLs in the content (http or https)
+            import re
+            content = primary_source.get('content', '')
+            original_links = re.findall(r'https?://[^\s]+', content)
+
+            if original_links:
+                # Filter out the insightfulsermons.com link, keep others
+                for link in original_links:
+                    if 'insightfulsermons.com' not in link:
+                        answer += f"\n\n🎧 Full sermon: [{link}]({link})"
+                        break
         else:
             # FIX #6: Fallback - ensure we always have a link if we have sermon content
             logger.warning("⚠️ No specific sources found, but sermon content was used")
