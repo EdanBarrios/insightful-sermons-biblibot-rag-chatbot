@@ -26,41 +26,49 @@ CORS(app)
 def build_formatted_response(answer, sources=None, bible_verses=None):
     sections = []
 
-    # Main answer
+    # Main answer only once
     if answer:
         sections.append(answer.strip())
 
-    # One single Bible verse
+    # One single Bible verse only
     if bible_verses:
         verse = bible_verses[0]
         reference = verse.get("reference", "").strip()
         verse_text = verse.get("text", "").strip()
 
-        one_verse_text = verse_text
         one_verse_ref = reference
+        one_verse_text = verse_text
 
-        # Try to grab only the first verse line if multiple verses were returned
-        lines = [line.strip() for line in verse_text.splitlines() if line.strip()]
-        if lines:
-            first_line = lines[0]
-            one_verse_text = first_line
+        if verse_text:
+            cleaned = " ".join(verse_text.split())
 
-            # If the first line starts with something like "Psa 4:3 ..."
-            m = re.match(r'^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$', first_line)
-            if m:
-                one_verse_ref = m.group(1).strip()
-                one_verse_text = m.group(2).strip()
+            # Case 1: text starts with something like "Gal 5:17 ..."
+            start_match = re.match(r'^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$', cleaned)
+            if start_match:
+                one_verse_ref = start_match.group(1).strip()
+                remainder = start_match.group(2).strip()
 
-        verse_block = []
+                # Stop when the next verse marker appears, like "Gal 5:18"
+                next_verse = re.search(r'\b[1-3]?\s?[A-Za-z]+\s+\d+:\d+\b', remainder)
+                if next_verse:
+                    one_verse_text = remainder[:next_verse.start()].strip()
+                else:
+                    one_verse_text = remainder.strip()
+            else:
+                # Fallback: just take first sentence
+                sentence_parts = re.split(r'(?<=[.!?])\s+', cleaned)
+                one_verse_text = sentence_parts[0].strip()
+
+        verse_lines = []
         if one_verse_text:
-            verse_block.append(f'Bible Verse: "{one_verse_text}"')
+            verse_lines.append(f'Bible Verse: "{one_verse_text}"')
         if one_verse_ref:
-            verse_block.append(f'— {one_verse_ref}')
+            verse_lines.append(f'— {one_verse_ref}')
 
-        if verse_block:
-            sections.append("\n".join(verse_block))
+        if verse_lines:
+            sections.append("\n".join(verse_lines))
 
-    # Related sermon links
+    # Related sermons with markdown links
     if sources:
         link_lines = ["Related sermons:"]
         seen_links = set()
@@ -73,7 +81,8 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
                 link_lines.append(f"- [{title}]({url})")
                 seen_links.add(url)
 
-        sections.append("\n".join(link_lines))
+        if len(link_lines) > 1:
+            sections.append("\n".join(link_lines))
 
     return "\n\n".join(sections).strip()
 
