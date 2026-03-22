@@ -23,36 +23,46 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 CORS(app)
 
 
-def build_formatted_response(answer, question, sources=None, bible_verses=None):
+def build_formatted_response(answer, sources=None, bible_verses=None):
     sections = []
 
-    # 1) Main answer
-    sections.append(f"Answer:\n{answer.strip()}")
+    # Main answer
+    if answer:
+        sections.append(answer.strip())
 
-    # 2) Bible verse
+    # One single Bible verse
     if bible_verses:
         verse = bible_verses[0]
         reference = verse.get("reference", "").strip()
         verse_text = verse.get("text", "").strip()
 
-        verse_block = ["Bible Verse:"]
-        if verse_text:
-            verse_block.append(verse_text)
-        if reference:
-            verse_block.append(f"— {reference}")
+        one_verse_text = verse_text
+        one_verse_ref = reference
 
-        sections.append("\n".join(verse_block))
+        # Try to grab only the first verse line if multiple verses were returned
+        lines = [line.strip() for line in verse_text.splitlines() if line.strip()]
+        if lines:
+            first_line = lines[0]
+            one_verse_text = first_line
 
-    # 3) Explicit response section using retrieved material
-    response_block = [
-        "Response to question using information from relevant sermons / verses in database:",
-        answer.strip()
-    ]
-    sections.append("\n".join(response_block))
+            # If the first line starts with something like "Psa 4:3 ..."
+            m = re.match(r'^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$', first_line)
+            if m:
+                one_verse_ref = m.group(1).strip()
+                one_verse_text = m.group(2).strip()
 
-    # 4) Related sermon links
+        verse_block = []
+        if one_verse_text:
+            verse_block.append(f'Bible Verse: "{one_verse_text}"')
+        if one_verse_ref:
+            verse_block.append(f'— {one_verse_ref}')
+
+        if verse_block:
+            sections.append("\n".join(verse_block))
+
+    # Related sermon links
     if sources:
-        link_lines = ["Links to related sermons they can read:"]
+        link_lines = ["Related sermons:"]
         seen_links = set()
 
         for source in sources:
@@ -60,20 +70,10 @@ def build_formatted_response(answer, question, sources=None, bible_verses=None):
             url = source.get("url", "").strip()
 
             if url and url not in seen_links:
-                link_lines.append(f"- {title}: {url}")
+                link_lines.append(f"- [{title}]({url})")
                 seen_links.add(url)
 
-            content = source.get("content", "")
-            original_links = re.findall(r'https?://[^\s)\]">]+', content)
-            for link in original_links:
-                if "insightfulsermons.com" not in link and link not in seen_links:
-                    link_lines.append(f"- Additional link: {link}")
-                    seen_links.add(link)
-                    break
-
         sections.append("\n".join(link_lines))
-    else:
-        sections.append("Links to related sermons they can read:\nNo related sermon links found.")
 
     return "\n\n".join(sections).strip()
 
@@ -198,7 +198,6 @@ def chat():
 
         final_answer = build_formatted_response(
             answer=answer,
-            question=question,
             sources=sources,
             bible_verses=bible_verses
         )
