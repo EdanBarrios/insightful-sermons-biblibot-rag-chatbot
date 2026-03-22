@@ -41,7 +41,7 @@ def chat():
     """
     Main chat endpoint.
     Expects: {"message": "user question"}
-    Returns: {"answer": "brief answer with sermon links"}
+    Returns: {"answer": "answer with sermon link and Bible verse citation"}
     """
     try:
         # Parse request
@@ -60,10 +60,9 @@ def chat():
         # Handle greetings BEFORE retrieval
         greetings = ['hi', 'hello', 'hey', 'yo', 'sup', 'howdy', 'greetings', 'good morning', 'good afternoon', 'good evening']
         
-        # FIX #3: Changed from <= 2 to == 1 (only single words trigger greeting)
         if question.lower().strip() in greetings or len(question.split()) == 1:
             return jsonify({
-                "answer": "Hello! I'm BibliBot, here to help you explore our sermons. Ask me about faith, grace, prayer, love, hope, or any Biblical topic!"
+                "answer": "Hello! I'm BibliBot, here to help you explore our sermons and the Bible. Ask me about faith, grace, prayer, love, hope, or any Biblical topic!"
             })
         
         # Step 1: Retrieve relevant context with metadata
@@ -74,54 +73,65 @@ def chat():
         from embeddings import embed
         vector = embed(question)
         
+        # Query for top matches (mix of sermons and Bible verses)
         res = index.query(
             vector=vector,
-            top_k=3,  # Get top 3 most relevant
+            top_k=5,  # Get top 5 to include both sermons and verses
             include_metadata=True
         )
         
         # Check if results are actually relevant (score threshold)
         if not res or "matches" not in res or not res["matches"]:
             logger.warning("No documents retrieved")
-            # Still answer, but flag that we have no sermon content
             answer = generate_answer("", question, has_sermon_content=False)
             return jsonify({"answer": answer})
         
-        # Filter by relevance score (only keep high-confidence matches)
-        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.2]  # Lowered from 0.25
+        # Filter by relevance score
+        relevant_matches = [m for m in res["matches"] if m.get("score", 0) > 0.2]
         
         if not relevant_matches:
             logger.warning("No sufficiently relevant matches found")
-            # Still answer, but flag that we have no relevant sermon content
             answer = generate_answer("", question, has_sermon_content=False)
             return jsonify({"answer": answer})
         
-        # Extract both text and metadata
+        # Separate sermon and Bible verse matches
         context_chunks = []
         sources = []
+        bible_verses = []
         seen_urls = set()
         
-        for match in relevant_matches:  # Use filtered matches
+        for match in relevant_matches:
             if "metadata" in match:
                 metadata = match["metadata"]
+                doc_type = metadata.get("type", "sermon")
                 
                 # Add text for context
                 if "text" in metadata:
                     context_chunks.append(metadata["text"])
                 
-                # Add unique sources with URLs from metadata
-                url = metadata.get("url", "")
-                if url and url not in seen_urls:
-                    sources.append({
-                        "title": metadata.get("title", "Sermon"),
-                        "url": url,
-                        "category": metadata.get("category", "General"),
-                        "content": metadata.get("text", "")  # Store content for original link extraction
+                # Handle sermons
+                if doc_type != "bible":
+                    url = metadata.get("url", "")
+                    if url and url not in seen_urls:
+                        sources.append({
+                            "title": metadata.get("title", "Sermon"),
+                            "url": url,
+                            "category": metadata.get("category", "General"),
+                            "content": metadata.get("text", "")
+                        })
+                        seen_urls.add(url)
+                
+                # Handle Bible verses
+                if doc_type == "bible" and not bible_verses:  # Only take first verse match
+                    bible_verses.append({
+                        "reference": metadata.get("reference", ""),
+                        "text": metadata.get("text", ""),
+                        "book": metadata.get("book", "")
                     })
-                    seen_urls.add(url)
         
         context = "\n\n---\n\n".join(context_chunks)
         logger.info(f"📚 Context built: {len(context)} chars from {len(context_chunks)} chunks")
+        logger.info(f"📖 Found {len(sources)} sermon(s) and {len(bible_verses)} Bible verse(s)")
         
         # Step 2: Generate answer (with sermon content)
         answer = generate_answer(context, question, has_sermon_content=True)
@@ -134,33 +144,44 @@ def chat():
         
         # Check if we refused to answer (no sermon content)
         if "don't have any sermons" in answer.lower() or "don't have sermons" in answer.lower():
-            # No sermon content - just return the refusal message
             return jsonify({"answer": answer})
         
+        # Step 3: Add sermon link
         if sources:
-            # Get most relevant source (first one from retrieval)
             primary_source = sources[0]
             answer += f"\n\nHere's a sermon related to your question!\n\n📖 [{primary_source['title']}]({primary_source['url']})"
             
-            # Look for URLs in the content (http or https)
+            # Look for original sermon links in content
             import re
             content = primary_source.get('content', '')
             original_links = re.findall(r'https?://[^\s]+', content)
 
             if original_links:
-                # Filter out the insightfulsermons.com link, keep others
                 for link in original_links:
                     if 'insightfulsermons.com' not in link:
-                        answer += f"\n\n🎧 Full sermon: [{link}]({link})"
+                        answer += f"\n🎧 Full sermon: [{link}]({link})"
                         break
         else:
-            # FIX #6: Fallback - ensure we always have a link if we have sermon content
             logger.warning("⚠️ No specific sources found, but sermon content was used")
             answer += "\n\nHere's a sermon related to your question!\n\n📖 [Browse all sermons](https://www.insightfulsermons.com/)"
         
-        logger.info(f"✅ Answer generated successfully with links")
+        # Step 4: Add Bible verse citation
+        if bible_verses:
+            verse = bible_verses[0]
+            reference = verse.get('reference', '')
+            verse_text = verse.get('text', '')
+            
+            # Format verse reference as link to Bible.com or similar
+            # Format: "Book Chapter:Verse"
+            bible_link = f"https://www.bible.com/search?q={reference.replace(' ', '%20')}"
+            
+            answer += f"\n\nA Bible verse addressing your question:\n\n\"{verse_text}\"\n\n— {reference}"
+            
+            logger.info(f"✅ Added Bible verse citation: {reference}")
         
-        # Step 4: Return response
+        logger.info(f"✅ Answer generated successfully with links and Bible verse")
+        
+        # Step 5: Return response
         return jsonify({
             "answer": answer
         })
