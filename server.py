@@ -61,7 +61,7 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
 
         verse_lines = []
         if one_verse_text:
-            verse_lines.append("Bible Verse:")
+            verse_lines.append("📚 Here's a related bible verse:")
             verse_lines.append(f'"{one_verse_text}"')
         if one_verse_ref:
             verse_lines.append(f'— {one_verse_ref}')
@@ -71,7 +71,7 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
 
     # Related sermons with markdown links
     if sources:
-        link_lines = ["Related sermons:"]
+        link_lines = ["📖 Check out related sermons!"]
         seen_links = set()
 
         for source in sources[:2]:
