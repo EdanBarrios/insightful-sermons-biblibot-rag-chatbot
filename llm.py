@@ -90,7 +90,7 @@ Provide a brief answer (2-3 sentences) using ONLY the information in the sermon 
             messages=[
                 {
                     "role": "system",
-                    "content": "You are BibliBot. Answer in 2-3 sentences using ONLY the sermon content provided. Be conversational and helpful."
+                    "content": "You are BibliBot. Answer in 2-3 sentences using ONLY the sermon content provided. Be conversational and helpful. Be compassionate, non-judgmental, and empathetic. Never accuse the user or imply moral failure. Frame guidance gently and supportively"
                 },
                 {
                     "role": "user",
