@@ -41,6 +41,7 @@ def generate_answer(context: str, question: str, has_sermon_content: bool = True
     Returns:
         Answer that acknowledges sermon availability
     """
+
     
     if not client:
         return "I'm having trouble connecting to the AI service. Please try again later."
