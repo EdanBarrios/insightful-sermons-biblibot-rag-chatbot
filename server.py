@@ -146,10 +146,13 @@ def chat():
         if "don't have any sermons" in answer.lower() or "don't have sermons" in answer.lower():
             return jsonify({"answer": answer})
         
+                # Build final response with proper formatting
+        final_answer = answer
+        
         # Step 3: Add sermon link
         if sources:
             primary_source = sources[0]
-            answer += f"\n\nHere's a sermon related to your question!\n\n📖 [{primary_source['title']}]({primary_source['url']})"
+            final_answer += f"\n\nHere's a sermon related to your question!\n\n📖 {primary_source['title']}\n{primary_source['url']}"
             
             # Look for original sermon links in content
             import re
@@ -159,30 +162,22 @@ def chat():
             if original_links:
                 for link in original_links:
                     if 'insightfulsermons.com' not in link:
-                        answer += f"\n🎧 Full sermon: [{link}]({link})"
+                        final_answer += f"\n\n🎧 Full sermon: {link}"
                         break
-        else:
-            logger.warning("⚠️ No specific sources found, but sermon content was used")
-            answer += "\n\nHere's a sermon related to your question!\n\n📖 [Browse all sermons](https://www.insightfulsermons.com/)"
         
         # Step 4: Add Bible verse citation
         if bible_verses:
             verse = bible_verses[0]
             reference = verse.get('reference', '')
-            verse_text = verse.get('text', '')
+            verse_text = verse.get('text', '')[:200]  # Just truncate to 200 chars
             
-            # Clean up verse text - remove extra newlines and truncate if too long
-            verse_text = ' '.join(verse_text.split())[:300]  # Limit to 300 chars
-            
-            answer += f"\n\nA Bible verse addressing your question:\n\n\"{verse_text}\"\n\n— {reference}"
-            
-            logger.info(f"✅ Added Bible verse citation: {reference}")
+            final_answer += f"\n\nBible verse: \"{verse_text}\"\n— {reference}"
         
-        logger.info(f"✅ Answer generated successfully with links and Bible verse")
-        
+        logger.info(f"✅ Answer generated successfully")
+  
         # Step 5: Return response
         return jsonify({
-            "answer": answer
+            "answer": final_answer
         })
     
     except Exception as e:
