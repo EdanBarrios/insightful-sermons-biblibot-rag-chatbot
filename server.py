@@ -171,9 +171,8 @@ def chat():
             reference = verse.get('reference', '')
             verse_text = verse.get('text', '')
             
-            # Format verse reference as link to Bible.com or similar
-            # Format: "Book Chapter:Verse"
-            bible_link = f"https://www.bible.com/search?q={reference.replace(' ', '%20')}"
+            # Clean up verse text - remove extra newlines and truncate if too long
+            verse_text = ' '.join(verse_text.split())[:300]  # Limit to 300 chars
             
             answer += f"\n\nA Bible verse addressing your question:\n\n\"{verse_text}\"\n\n— {reference}"
             
