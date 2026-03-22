@@ -152,7 +152,7 @@ def chat():
         # Step 3: Add sermon link
         if sources:
             primary_source = sources[0]
-            final_answer += f"\n\nHere's a sermon related to your question!\n\n📖 {primary_source['title']}\n{primary_source['url']}"
+            final_answer += f"\n\nHere's a related sermon:\n📖 {primary_source['title']}\n{primary_source['url']}"
             
             # Look for original sermon links in content
             import re
@@ -162,18 +162,19 @@ def chat():
             if original_links:
                 for link in original_links:
                     if 'insightfulsermons.com' not in link:
-                        final_answer += f"\n\n🎧 Full sermon: {link}"
+                        final_answer += f"\n🎧 {link}"
                         break
-        
-        # Step 4: Add Bible verse citation
+
+        # Step 4: Add ONE Bible verse citation - just the first sentence
         if bible_verses:
             verse = bible_verses[0]
             reference = verse.get('reference', '')
-            verse_text = verse.get('text', '')[:200]  # Just truncate to 200 chars
+            verse_text = verse.get('text', '')
             
-            final_answer += f"\n\nBible verse: \"{verse_text}\"\n— {reference}"
-        
-        logger.info(f"✅ Answer generated successfully")
+            # Get just the first sentence
+            first_sentence = verse_text.split('.')[0] + '.'
+            
+            final_answer += f"\n\nBible verse:\n\"{first_sentence}\"\n— {reference}"
   
         # Step 5: Return response
         return jsonify({
