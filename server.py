@@ -5,12 +5,15 @@ from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-from pinecone import Pinecone
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-index = pc.Index("sermon-index")
+load_dotenv()
 
+from pinecone import Pinecone
 from llm import generate_answer
 from memory import init_db, save_message, get_recent_messages
+from embeddings import embed
+
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+index = pc.Index("sermon-index")
 
 # -------------------- Setup --------------------
 
@@ -105,8 +108,7 @@ def health():
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        data = request.get_json()
-
+        data = request.get_json(silent=True) or {}
         question = data.get("message", "").strip()
         session_id = data.get("session_id", "").strip() or "anonymous"
 
@@ -140,8 +142,6 @@ def chat():
         )
 
         # -------- Retrieval --------
-        from embeddings import embed
-
         logger.info("Starting embed")
         vector = embed(question)
         logger.info("Finished embed")
