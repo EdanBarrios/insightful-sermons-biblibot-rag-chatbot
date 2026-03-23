@@ -5,6 +5,10 @@ from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from dotenv import load_dotenv
 
+from pinecone import Pinecone
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+index = pc.Index("sermon-index")
+
 from llm import generate_answer
 from memory import init_db, save_message, get_recent_messages
 
@@ -136,19 +140,15 @@ def chat():
         )
 
         # -------- Retrieval --------
-        from pinecone import Pinecone
         from embeddings import embed
 
-        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        index = pc.Index("sermon-index")
-
+        logger.info("Starting embed")
         vector = embed(question)
+        logger.info("Finished embed")
 
-        res = index.query(
-            vector=vector,
-            top_k=5,
-            include_metadata=True
-        )
+        logger.info("Starting Pinecone query")
+        res = index.query(vector=vector, top_k=5, include_metadata=True)
+        logger.info("Finished Pinecone query")
 
         sources = []
         bible_verses = []
@@ -193,11 +193,9 @@ def chat():
             )
 
         # -------- LLM --------
-        answer = generate_answer(
-            combined_context,
-            question,
-            has_sermon_content=True
-        )
+        logger.info("Starting LLM generation")
+        answer = generate_answer(combined_context, question, has_sermon_content=True)
+        logger.info("Finished LLM generation")
 
         if not answer:
             answer = "I'm sorry, I couldn't generate a response. Please try again."
@@ -237,4 +235,4 @@ def server_error(e):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False
+    app.run(host="0.0.0.0", port=port, debug=False)
