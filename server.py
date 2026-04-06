@@ -32,6 +32,63 @@ init_db()
 
 # -------------------- Helpers --------------------
 
+def extract_keywords(text):
+    """Extract meaningful keywords from text"""
+    words = re.findall(r'\b\w+\b', text.lower())
+    # Filter out common stop words and short words
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'is', 'are', 'be', 'do', 'does', 'did', 'have', 'has', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'how', 'why', 'when', 'where', 'does'}
+    keywords = {w for w in words if len(w) > 2 and w not in stop_words}
+    return keywords
+
+
+def calculate_keyword_score(text, keywords):
+    """Calculate how many keywords appear in text"""
+    if not keywords:
+        return 0
+    text_lower = text.lower()
+    matches = sum(1 for keyword in keywords if keyword in text_lower)
+    return matches / len(keywords)
+
+
+def hybrid_search(semantic_results, question):
+    """
+    Combine semantic search results with keyword matching.
+    Returns re-ranked results based on hybrid score.
+    """
+    question_keywords = extract_keywords(question)
+    logger.info(f"Question keywords: {question_keywords}")
+    
+    # Calculate hybrid scores
+    scored_matches = []
+    
+    for match in semantic_results.get("matches", []):
+        semantic_score = match.get("score", 0)
+        
+        # Get text from metadata
+        metadata = match.get("metadata", {})
+        text = (metadata.get("text", "") + " " + metadata.get("title", "")).lower()
+        
+        # Calculate keyword score
+        keyword_score = calculate_keyword_score(text, question_keywords)
+        
+        # Hybrid score: 60% semantic, 40% keyword
+        hybrid_score = (semantic_score * 0.6) + (keyword_score * 0.4)
+        
+        scored_matches.append({
+            **match,
+            "hybrid_score": hybrid_score,
+            "keyword_score": keyword_score
+        })
+    
+    # Re-rank by hybrid score
+    scored_matches.sort(key=lambda m: m["hybrid_score"], reverse=True)
+    
+    logger.info(f"Top match hybrid score: {scored_matches[0]['hybrid_score'] if scored_matches else 'N/A'}")
+    logger.info(f"Top match keyword score: {scored_matches[0]['keyword_score'] if scored_matches else 'N/A'}")
+    
+    return scored_matches
+
+
 def extract_single_verse(reference, verse_text):
     cleaned = " ".join((verse_text or "").split()).strip()
     ref = (reference or "").strip()
@@ -141,22 +198,28 @@ def chat():
             for msg in history
         )
 
-        # -------- Retrieval --------
+        # -------- Retrieval with Hybrid Search --------
         logger.info("Starting embed")
         vector = embed(question)
         logger.info("Finished embed")
 
         logger.info("Starting Pinecone query")
-        res = index.query(vector=vector, top_k=5, include_metadata=True)
+        res = index.query(vector=vector, top_k=10, include_metadata=True)
         logger.info("Finished Pinecone query")
+
+        # -------- Hybrid Search Ranking --------
+        logger.info("Starting hybrid search ranking")
+        hybrid_results = hybrid_search(res, question)
+        logger.info("Finished hybrid search ranking")
 
         sources = []
         bible_verses = []
         context_chunks = []
         seen_urls = set()
 
-        if res and "matches" in res:
-            relevant = [m for m in res["matches"] if m.get("score", 0) > 0.2]
+        if hybrid_results:
+            # Use higher threshold with hybrid scoring
+            relevant = [m for m in hybrid_results if m.get("hybrid_score", 0) > 0.25]
 
             for match in relevant:
                 md = match.get("metadata", {})
