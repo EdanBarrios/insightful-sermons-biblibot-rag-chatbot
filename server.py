@@ -18,8 +18,7 @@ index = pc.Index("sermon-index")
 # -------------------- Setup --------------------
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -32,11 +31,49 @@ init_db()
 
 # -------------------- Helpers --------------------
 
+
 def extract_keywords(text):
     """Extract meaningful keywords from text"""
-    words = re.findall(r'\b\w+\b', text.lower())
+    words = re.findall(r"\b\w+\b", text.lower())
     # Filter out common stop words and short words
-    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'is', 'are', 'be', 'do', 'does', 'did', 'have', 'has', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'what', 'how', 'why', 'when', 'where', 'does'}
+    stop_words = {
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "be",
+        "do",
+        "does",
+        "did",
+        "have",
+        "has",
+        "i",
+        "you",
+        "he",
+        "she",
+        "it",
+        "we",
+        "they",
+        "what",
+        "how",
+        "why",
+        "when",
+        "where",
+        "does",
+    }
     keywords = {w for w in words if len(w) > 2 and w not in stop_words}
     return keywords
 
@@ -74,17 +111,16 @@ def hybrid_search(semantic_results, question):
         # Hybrid score: 60% semantic, 40% keyword
         hybrid_score = (semantic_score * 0.6) + (keyword_score * 0.4)
         
-        # Create new dict with original match data plus new scores
-        scored_match = dict(match)
-        scored_match["hybrid_score"] = hybrid_score
-        scored_match["keyword_score"] = keyword_score
-        scored_matches.append(scored_match)
+        # Add scores to match
+        match["hybrid_score"] = hybrid_score
+        match["keyword_score"] = keyword_score
+        scored_matches.append(match)
     
     # Re-rank by hybrid score
-    scored_matches.sort(key=lambda m: m["hybrid_score"], reverse=True)
+    scored_matches.sort(key=lambda m: m.get("hybrid_score", 0), reverse=True)
     
-    logger.info(f"Top match hybrid score: {scored_matches[0]['hybrid_score'] if scored_matches else 'N/A'}")
-    logger.info(f"Top match keyword score: {scored_matches[0]['keyword_score'] if scored_matches else 'N/A'}")
+    logger.info(f"Top match hybrid score: {scored_matches[0].get('hybrid_score', 'N/A') if scored_matches else 'N/A'}")
+    logger.info(f"Top match keyword score: {scored_matches[0].get('keyword_score', 'N/A') if scored_matches else 'N/A'}")
     
     return scored_matches
 
@@ -96,16 +132,16 @@ def extract_single_verse(reference, verse_text):
     if not cleaned:
         return ref, ""
 
-    m = re.match(r'^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$', cleaned)
+    m = re.match(r"^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$", cleaned)
     if m:
         ref = m.group(1).strip()
         remainder = m.group(2).strip()
     else:
         remainder = cleaned
 
-    next_marker = re.search(r'\b[1-3]?\s?[A-Za-z]+\s+\d+:\d+\b', remainder)
+    next_marker = re.search(r"\b[1-3]?\s?[A-Za-z]+\s+\d+:\d+\b", remainder)
     if next_marker:
-        remainder = remainder[:next_marker.start()].strip()
+        remainder = remainder[: next_marker.start()].strip()
 
     return ref, remainder
 
@@ -120,8 +156,7 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
     if bible_verses:
         verse = bible_verses[0]
         ref, text = extract_single_verse(
-            verse.get("reference", ""),
-            verse.get("text", "")
+            verse.get("reference", ""), verse.get("text", "")
         )
 
         if text:
@@ -133,7 +168,7 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
         seen = set()
 
         for source in sources[:2]:  # limit to 2
-            title = source.get("title", "Sermon").replace('"', '').strip()
+            title = source.get("title", "Sermon").replace('"', "").strip()
             url = source.get("url", "").strip()
 
             if url and url not in seen:
@@ -151,6 +186,7 @@ def save_turn(session_id, user_msg, assistant_msg):
 
 
 # -------------------- Routes --------------------
+
 
 @app.route("/")
 def home():
@@ -176,8 +212,15 @@ def chat():
 
         # -------- Greeting --------
         greetings = [
-            'hi', 'hello', 'hey', 'yo', 'sup',
-            'greetings', 'good morning', 'good afternoon', 'good evening'
+            "hi",
+            "hello",
+            "hey",
+            "yo",
+            "sup",
+            "greetings",
+            "good morning",
+            "good afternoon",
+            "good evening",
         ]
 
         if question.lower() in greetings or len(question.split()) == 1:
@@ -194,8 +237,7 @@ def chat():
         history = get_recent_messages(session_id, limit=6)
 
         history_text = "\n".join(
-            f"{msg['role'].upper()}: {msg['content']}"
-            for msg in history
+            f"{msg['role'].upper()}: {msg['content']}" for msg in history
         )
 
         # -------- Retrieval with Hybrid Search --------
@@ -229,19 +271,23 @@ def chat():
                     context_chunks.append(md["text"])
 
                 if doc_type == "bible" and not bible_verses:
-                    bible_verses.append({
-                        "reference": md.get("reference", ""),
-                        "text": md.get("text", "")
-                    })
+                    bible_verses.append(
+                        {
+                            "reference": md.get("reference", ""),
+                            "text": md.get("text", ""),
+                        }
+                    )
 
                 if doc_type != "bible":
                     url = md.get("url", "")
                     if url and url not in seen_urls:
-                        sources.append({
-                            "title": md.get("title", "Sermon"),
-                            "url": url,
-                            "content": md.get("text", "")
-                        })
+                        sources.append(
+                            {
+                                "title": md.get("title", "Sermon"),
+                                "url": url,
+                                "content": md.get("text", ""),
+                            }
+                        )
                         seen_urls.add(url)
 
         context = "\n\n---\n\n".join(context_chunks)
@@ -265,9 +311,7 @@ def chat():
 
         # -------- Format --------
         final_answer = build_formatted_response(
-            answer=answer,
-            sources=sources,
-            bible_verses=bible_verses
+            answer=answer, sources=sources, bible_verses=bible_verses
         )
 
         # -------- Save --------
@@ -277,12 +321,11 @@ def chat():
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({
-            "answer": "Something went wrong. Please try again."
-        }), 500
+        return jsonify({"answer": "Something went wrong. Please try again."}), 500
 
 
 # -------------------- Errors --------------------
+
 
 @app.errorhandler(404)
 def not_found(e):
