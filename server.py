@@ -74,11 +74,11 @@ def hybrid_search(semantic_results, question):
         # Hybrid score: 60% semantic, 40% keyword
         hybrid_score = (semantic_score * 0.6) + (keyword_score * 0.4)
         
-        scored_matches.append({
-            **match,
-            "hybrid_score": hybrid_score,
-            "keyword_score": keyword_score
-        })
+        # Create new dict with original match data plus new scores
+        scored_match = dict(match)
+        scored_match["hybrid_score"] = hybrid_score
+        scored_match["keyword_score"] = keyword_score
+        scored_matches.append(scored_match)
     
     # Re-rank by hybrid score
     scored_matches.sort(key=lambda m: m["hybrid_score"], reverse=True)
