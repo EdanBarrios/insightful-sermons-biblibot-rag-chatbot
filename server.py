@@ -18,8 +18,7 @@ index = pc.Index("sermon-index")
 # -------------------- Setup --------------------
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -96,16 +95,16 @@ def extract_single_verse(reference, verse_text):
     if not cleaned:
         return ref, ""
 
-    m = re.match(r'^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$', cleaned)
+    m = re.match(r"^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$", cleaned)
     if m:
         ref = m.group(1).strip()
         remainder = m.group(2).strip()
     else:
         remainder = cleaned
 
-    next_marker = re.search(r'\b[1-3]?\s?[A-Za-z]+\s+\d+:\d+\b', remainder)
+    next_marker = re.search(r"\b[1-3]?\s?[A-Za-z]+\s+\d+:\d+\b", remainder)
     if next_marker:
-        remainder = remainder[:next_marker.start()].strip()
+        remainder = remainder[: next_marker.start()].strip()
 
     return ref, remainder
 
@@ -120,8 +119,7 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
     if bible_verses:
         verse = bible_verses[0]
         ref, text = extract_single_verse(
-            verse.get("reference", ""),
-            verse.get("text", "")
+            verse.get("reference", ""), verse.get("text", "")
         )
 
         if text:
@@ -133,7 +131,7 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
         seen = set()
 
         for source in sources[:2]:  # limit to 2
-            title = source.get("title", "Sermon").replace('"', '').strip()
+            title = source.get("title", "Sermon").replace('"', "").strip()
             url = source.get("url", "").strip()
 
             if url and url not in seen:
@@ -151,6 +149,7 @@ def save_turn(session_id, user_msg, assistant_msg):
 
 
 # -------------------- Routes --------------------
+
 
 @app.route("/")
 def home():
@@ -176,8 +175,15 @@ def chat():
 
         # -------- Greeting --------
         greetings = [
-            'hi', 'hello', 'hey', 'yo', 'sup',
-            'greetings', 'good morning', 'good afternoon', 'good evening'
+            "hi",
+            "hello",
+            "hey",
+            "yo",
+            "sup",
+            "greetings",
+            "good morning",
+            "good afternoon",
+            "good evening",
         ]
 
         if question.lower() in greetings or len(question.split()) == 1:
@@ -194,10 +200,10 @@ def chat():
         history = get_recent_messages(session_id, limit=6)
 
         history_text = "\n".join(
-            f"{msg['role'].upper()}: {msg['content']}"
-            for msg in history
+            f"{msg['role'].upper()}: {msg['content']}" for msg in history
         )
 
+        # -------- Retrieval with Hybrid Search --------
         # -------- Retrieval with Hybrid Search --------
         logger.info("Starting embed")
         vector = embed(question)
@@ -205,7 +211,13 @@ def chat():
 
         logger.info("Starting Pinecone query")
         res = index.query(vector=vector, top_k=10, include_metadata=True)
+        res = index.query(vector=vector, top_k=10, include_metadata=True)
         logger.info("Finished Pinecone query")
+
+        # -------- Hybrid Search Ranking --------
+        logger.info("Starting hybrid search ranking")
+        hybrid_results = hybrid_search(res, question)
+        logger.info("Finished hybrid search ranking")
 
         # -------- Hybrid Search Ranking --------
         logger.info("Starting hybrid search ranking")
@@ -240,11 +252,13 @@ def chat():
                 if doc_type != "bible":
                     url = md.get("url", "")
                     if url and url not in seen_urls:
-                        sources.append({
-                            "title": md.get("title", "Sermon"),
-                            "url": url,
-                            "content": md.get("text", "")
-                        })
+                        sources.append(
+                            {
+                                "title": md.get("title", "Sermon"),
+                                "url": url,
+                                "content": md.get("text", ""),
+                            }
+                        )
                         seen_urls.add(url)
 
         context = "\n\n---\n\n".join(context_chunks)
@@ -268,9 +282,7 @@ def chat():
 
         # -------- Format --------
         final_answer = build_formatted_response(
-            answer=answer,
-            sources=sources,
-            bible_verses=bible_verses
+            answer=answer, sources=sources, bible_verses=bible_verses
         )
 
         # -------- Save --------
@@ -280,12 +292,11 @@ def chat():
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({
-            "answer": "Something went wrong. Please try again."
-        }), 500
+        return jsonify({"answer": "Something went wrong. Please try again."}), 500
 
 
 # -------------------- Errors --------------------
+
 
 @app.errorhandler(404)
 def not_found(e):
