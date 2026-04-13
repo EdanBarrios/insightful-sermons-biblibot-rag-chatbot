@@ -73,17 +73,16 @@ def hybrid_search(semantic_results, question):
         # Hybrid score: 60% semantic, 40% keyword
         hybrid_score = (semantic_score * 0.6) + (keyword_score * 0.4)
         
-        scored_matches.append({
-            **match,
-            "hybrid_score": hybrid_score,
-            "keyword_score": keyword_score
-        })
+        # Manually add scores to match without unpacking
+        match["hybrid_score"] = hybrid_score
+        match["keyword_score"] = keyword_score
+        scored_matches.append(match)
     
     # Re-rank by hybrid score
-    scored_matches.sort(key=lambda m: m["hybrid_score"], reverse=True)
+    scored_matches.sort(key=lambda m: m.get("hybrid_score", 0), reverse=True)
     
-    logger.info(f"Top match hybrid score: {scored_matches[0]['hybrid_score'] if scored_matches else 'N/A'}")
-    logger.info(f"Top match keyword score: {scored_matches[0]['keyword_score'] if scored_matches else 'N/A'}")
+    logger.info(f"Top match hybrid score: {scored_matches[0].get('hybrid_score', 'N/A') if scored_matches else 'N/A'}")
+    logger.info(f"Top match keyword score: {scored_matches[0].get('keyword_score', 'N/A') if scored_matches else 'N/A'}")
     
     return scored_matches
 
@@ -204,20 +203,13 @@ def chat():
         )
 
         # -------- Retrieval with Hybrid Search --------
-        # -------- Retrieval with Hybrid Search --------
         logger.info("Starting embed")
         vector = embed(question)
         logger.info("Finished embed")
 
         logger.info("Starting Pinecone query")
         res = index.query(vector=vector, top_k=10, include_metadata=True)
-        res = index.query(vector=vector, top_k=10, include_metadata=True)
         logger.info("Finished Pinecone query")
-
-        # -------- Hybrid Search Ranking --------
-        logger.info("Starting hybrid search ranking")
-        hybrid_results = hybrid_search(res, question)
-        logger.info("Finished hybrid search ranking")
 
         # -------- Hybrid Search Ranking --------
         logger.info("Starting hybrid search ranking")
