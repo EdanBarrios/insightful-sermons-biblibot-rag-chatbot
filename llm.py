@@ -29,23 +29,23 @@ def is_sermon_question(question: str) -> bool:
     # Otherwise assume it's a real question
     return True
 
-def generate_answer(context: str, question: str, has_sermon_content: bool = True) -> str:
+def generate_answer(context: str, question: str, has_sermon_content: bool = True, bible_verse_context: str = "") -> str:
     """
-    Generate answer - with or without sermon content.
-    
+    Generate a structured, actionable answer using sermon content.
+
     Args:
-        context: Retrieved sermon chunks (may be empty)
+        context: Retrieved sermon chunks with author/title headers
         question: User's question
         has_sermon_content: Whether we found relevant sermons
-        
+        bible_verse_context: Pre-formatted verse string ("Ref: 'text'") or ""
+
     Returns:
-        Answer that acknowledges sermon availability
+        3-tier structured answer (Quick Answer / Path Forward / Theological Foundation)
     """
 
-    
     if not client:
         return "I'm having trouble connecting to the AI service. Please try again later."
-    
+
     # Handle greetings and small talk
     if not is_sermon_question(question):
         try:
@@ -68,45 +68,61 @@ def generate_answer(context: str, question: str, has_sermon_content: bool = True
         except Exception as e:
             logger.error(f"❌ Small talk error: {e}")
             return "Hello! I'm BibliBot. Ask me about faith, grace, prayer, or any Biblical topic!"
-    
-    # Handle questions WITHOUT sermon content - REFUSE to answer
+
+    # Handle questions WITHOUT sermon content
     if not has_sermon_content or not context.strip():
         return "I don't have any sermons that cover this topic. Try asking about faith, grace, prayer, love, hope, or other Biblical themes from our sermon library."
-    
-    # FIX #4: Changed "SERMON EXCERPTS" to "SERMON SUMMARIES"
-    # Handle questions WITH sermon content - use sermons!
-    prompt = f"""You are BibliBot. Answer based on these sermon summaries.
 
-SERMON SUMMARIES:
+    bible_section = f"\nBIBLE VERSE:\n{bible_verse_context}\n" if bible_verse_context else ""
+
+    prompt = f"""SERMON CONTEXT:
 {context}
+{bible_section}
+QUESTION: {question}"""
 
-QUESTION:
-{question}
+    system = """You are BibliBot, a Biblical counselor and spiritual guide. Use the sermon content provided to give structured, actionable answers.
 
-Provide a brief answer (2-3 sentences) using ONLY the information in the sermon summaries above. Be conversational but stay strictly within the sermon content."""
+ANSWER FORMAT (follow exactly — plain text only, no asterisks or markdown):
+
+Quick Answer:
+[1-2 sentences directly answering the question with a clear, memorable takeaway]
+
+Your Path Forward:
+• [Concrete action or concept] — [weave in a scripture reference or sermon insight naturally]
+• [Concrete action or concept] — [weave in a scripture reference or sermon insight naturally]
+• [Concrete action or concept] — [weave in a scripture reference or sermon insight naturally]
+(3–5 bullets; vary phrasing so they don't all sound the same)
+
+Theological Foundation:
+[1-2 sentences connecting this to a broader Biblical theme. If the sermon context names an author, reference them: "As [Author] reminds us in their sermon on [topic], ..."]
+
+RULES:
+- Use ONLY content drawn from the sermon context above
+- Weave scripture naturally into bullet points — don't just append citations at the end
+- If a Bible verse is provided, integrate it into the most fitting bullet point
+- Reference sermon authors by name when the context includes one
+- Never use vague filler phrases like "is an important aspect of" or "can be challenging"
+- Never give advice without a concrete step ("trust God" must come with a how)
+- Be pastoral and compassionate — frame guidance gently, never accusatorily
+- Keep total response under 300 words
+- Do NOT use ** or any markdown formatting — plain text only"""
 
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are BibliBot. Answer in 2-3 sentences using ONLY the sermon content provided. Be conversational and helpful. Be compassionate, non-judgmental, and empathetic. Never accuse the user or imply moral failure. Frame guidance gently and supportively"
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            max_tokens=150,
+            max_tokens=600,
             top_p=0.9
         )
-        
+
         answer = response.choices[0].message.content.strip()
-        logger.info(f"✅ Generated answer (with sermons): {answer[:100]}...")
+        logger.info(f"✅ Generated answer: {answer[:100]}...")
         return answer
-        
+
     except Exception as e:
         logger.error(f"❌ LLM generation error: {e}")
         return "I apologize, but I'm having trouble generating a response right now. Please try again."

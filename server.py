@@ -31,6 +31,56 @@ init_db()
 
 # -------------------- Helpers --------------------
 
+def extract_author_from_text(text):
+    """
+    Extract preacher/author name from sermon text.
+
+    Handles the patterns seen in the database:
+      'A Tim Keller Sermon Summary ...'
+      'A Charles R. Swindoll Sermon Summary ...'
+      'A Lesson from John Calvin ...'
+      'of a Lesson from Tim Keller ...'
+      '... from a Tim Keller sermon: http://...'
+      '... sermon by John Calvin: https://...'
+      '... by Charles R. Swindoll https://...'
+
+    Returns the author name string, or "" if not found.
+    """
+    text = text.strip()
+
+    # Name pattern: First [M.]? Last  (handles "Tim Keller", "Charles R. Swindoll")
+    NAME = r'([A-Z][a-zA-Z]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z]+)?)'
+
+    # --- Start-of-text patterns (most reliable) ---
+    start_patterns = [
+        rf'^A\s+{NAME}\s+Sermon\s+Summary',       # "A Tim Keller Sermon Summary"
+        rf'^A\s+Lesson\s+from\s+{NAME}',            # "A Lesson from John Calvin"
+        rf'^of\s+a\s+[Ll]esson\s+from\s+{NAME}',  # "of a Lesson from Tim Keller"
+    ]
+    for pattern in start_patterns:
+        m = re.match(pattern, text)
+        if m:
+            author = m.group(1).strip()
+            if author:
+                return author
+
+    # --- End-of-text patterns (fallback) ---
+    tail = text[-300:] if len(text) > 300 else text
+    end_patterns = [
+        rf'from\s+a\s+{NAME}\s+[Ss]ermon',          # "from a Tim Keller sermon"
+        rf'[Ss]ermon\s+by\s+{NAME}',                  # "sermon by John Calvin"
+        rf'\sby\s+{NAME}\s*(?:https?://)',             # "by Charles R. Swindoll https://"
+    ]
+    for pattern in end_patterns:
+        m = re.search(pattern, tail)
+        if m:
+            author = m.group(1).strip()
+            if author:
+                return author
+
+    return ""
+
+
 def extract_keywords(text):
     """Extract meaningful keywords from text"""
     words = re.findall(r'\b\w+\b', text.lower())
@@ -230,12 +280,24 @@ def chat():
                 doc_type = md.get("type", "sermon")
 
                 if "text" in md:
-                    context_chunks.append(md["text"])
+                    if doc_type != "bible":
+                        # Build a rich header so LLM can reference author/title by name
+                        title = md.get("title", "").strip()
+                        category = md.get("category", "").strip()
+                        author = extract_author_from_text(md["text"])
+                        header_parts = [f'Sermon: "{title}"']
+                        if author:
+                            header_parts.append(f"by {author}")
+                        if category:
+                            header_parts.append(f"[{category}]")
+                        context_chunks.append(f"[{', '.join(header_parts)}]\n{md['text']}")
+                    else:
+                        context_chunks.append(md["text"])
 
                 # Only add Bible verse if it has HIGH keyword match
                 if doc_type == "bible" and not bible_verses:
                     keyword_score = match.get("keyword_score", 0)
-                    if keyword_score > 0.6:  
+                    if keyword_score > 0.6:
                         bible_verses.append({
                             "reference": md.get("reference", ""),
                             "text": md.get("text", "")
@@ -264,9 +326,17 @@ def chat():
                 f"Relevant context:\n{context}"
             )
 
+        # -------- Bible verse context for LLM --------
+        bible_verse_context = ""
+        if bible_verses:
+            v = bible_verses[0]
+            ref, text = extract_single_verse(v.get("reference", ""), v.get("text", ""))
+            if text:
+                bible_verse_context = f"{ref}: \"{text}\""
+
         # -------- LLM --------
         logger.info("Starting LLM generation")
-        answer = generate_answer(combined_context, question, has_sermon_content=True)
+        answer = generate_answer(combined_context, question, has_sermon_content=True, bible_verse_context=bible_verse_context)
         logger.info("Finished LLM generation")
 
         if not answer:
