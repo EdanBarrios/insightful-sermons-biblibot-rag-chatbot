@@ -234,7 +234,7 @@ def chat():
 
                 # Only add Bible verse if it has HIGH keyword match
                 if doc_type == "bible" and not bible_verses:
-                    keyword_score = m.get("keyword_score", 0)
+                    keyword_score = match.get("keyword_score", 0)
                     if keyword_score > 0.5:  
                         bible_verses.append({
                             "reference": md.get("reference", ""),
