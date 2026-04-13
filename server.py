@@ -219,7 +219,7 @@ def chat():
 
         if hybrid_results:
             # Use higher threshold with hybrid scoring
-            relevant = [m for m in hybrid_results if m.get("hybrid_score", 0) > 0.25]
+            relevant = [m for m in hybrid_results if m.get("hybrid_score", 0) > 0.35]
 
             for match in relevant:
                 md = match.get("metadata", {})
@@ -228,11 +228,14 @@ def chat():
                 if "text" in md:
                     context_chunks.append(md["text"])
 
+                # Only add Bible verse if it has HIGH keyword match
                 if doc_type == "bible" and not bible_verses:
-                    bible_verses.append({
-                        "reference": md.get("reference", ""),
-                        "text": md.get("text", "")
-                    })
+                    keyword_score = m.get("keyword_score", 0)
+                    if keyword_score > 0.5:  
+                        bible_verses.append({
+                            "reference": md.get("reference", ""),
+                            "text": md.get("text", "")
+                        })
 
                 if doc_type != "bible":
                     url = md.get("url", "")
