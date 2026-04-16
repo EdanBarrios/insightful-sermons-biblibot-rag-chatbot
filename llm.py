@@ -126,3 +126,48 @@ RULES:
     except Exception as e:
         logger.error(f"❌ LLM generation error: {e}")
         return "I apologize, but I'm having trouble generating a response right now. Please try again."
+    
+def generate_legacy_answer(context: str, question: str) -> str:
+    """
+    Generate an answer in the old chatbot's style:
+    - Max 8 sentences
+    - Clear, concise, positive
+    - Only from sermon context
+    - No structured format (no Quick Answer / Path Forward sections)
+    """
+    if not client:
+        return "I'm having trouble connecting. Please try again later."
+
+    system = """You are a Biblical chatbot that answers questions exclusively from the collection of sermons in your context from the website Insightful Sermons. If the answer is not found within this specific context, respond concisely with "Sorry, I do not have enough information to answer that question." Your responses should always be clear, concise, positive, and correct, in sentence format, ending with a period. Each response should be limited to a maximum of eight sentences. If a question involves a pronoun or ambiguous reference, ask for clarification without providing any additional commentary. Make sure that your answers never pull from any external data. You cannot use any outside information or previous knowledge."""
+
+    prompt = f"Context: {context}\n\nQuestion: {question}\n\nAnswer:"
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=400,
+            top_p=0.9
+        )
+        answer = response.choices[0].message.content.strip()
+
+        # Clean up (ported from old format_answer)
+        if "Answer:" in answer:
+            answer = answer.split("Answer:")[-1].strip()
+        answer = answer.replace("1.", "").replace("2.", "").replace("3.", "").replace("4.", "")
+        answer = " ".join(answer.split()).strip(", ")
+
+        if not answer.endswith("."):
+            last_period = answer.rfind(".")
+            if last_period != -1:
+                answer = answer[:last_period + 1]
+
+        return answer
+
+    except Exception as e:
+        logger.error(f"Legacy LLM error: {e}")
+        return "I apologize, but I'm having trouble generating a response right now. Please try again."
