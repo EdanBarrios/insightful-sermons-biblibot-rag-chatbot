@@ -2,8 +2,6 @@ import os
 import logging
 import re
 from flask import Flask, request, jsonify, render_template
-from legacy_source_match import find_most_similar_source, format_answer_with_sources
-from llm import generate_answer, generate_legacy_answer
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -205,6 +203,8 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
                 seen.add(url)
 
         sections.append("\n".join(lines))
+    else:
+        sections.append("No specific sermons in our library cover this topic.")
 
     return "\n\n".join(sections).strip()
 
@@ -290,7 +290,10 @@ def chat():
 
         if hybrid_results:
             # Use higher threshold with hybrid scoring
-            relevant = [m for m in hybrid_results if m.get("hybrid_score", 0) > 0.35]
+            relevant = [
+                m for m in hybrid_results
+                if m.get("hybrid_score", 0) > 0.5 and m.get("score", 0) > 0.45
+            ]
 
             for match in relevant:
                 md = match.get("metadata", {})
@@ -353,7 +356,8 @@ def chat():
 
         # -------- LLM --------
         logger.info("Starting LLM generation")
-        answer = generate_answer(combined_context, question, has_sermon_content=True, bible_verse_context=bible_verse_context)
+        has_content = bool(context_chunks)
+        answer = generate_answer(combined_context, question, has_sermon_content=has_content, bible_verse_context=bible_verse_context)
         logger.info("Finished LLM generation")
 
         if not answer:
@@ -371,73 +375,6 @@ def chat():
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        return jsonify({"answer": "Something went wrong. Please try again."}), 500
-    
-    
-# --- Add the legacy endpoint ---
-@app.route("/chat-legacy", methods=["POST"])
-def chat_legacy():
-    try:
-        data = request.get_json(silent=True) or {}
-        question = data.get("message", "").strip()
-
-        if not question:
-            return jsonify({"answer": "Please ask a question."})
-
-        # Greeting check
-        greetings = ["hi", "hello", "hey", "yo", "sup", "greetings"]
-        if question.lower() in greetings:
-            return jsonify({
-                "answer": "Welcome! I am here to help you answer any questions "
-                          "related to the sermons at https://www.insightfulsermons.com/"
-            })
-
-        # Retrieve from SAME Pinecone index as new bot
-        vector = embed(question)
-        res = index.query(vector=vector, top_k=10, include_metadata=True)
-
-        # FILTER OUT Bible verses — old bot should only use sermons
-        context_chunks = []
-        for match in res.get("matches", []):
-            md = match.get("metadata", {})
-            doc_type = md.get("type", "sermon")  # default to sermon if not tagged
-
-            # Skip Bible verses entirely
-            if doc_type == "bible":
-                continue
-
-            if "text" in md:
-                context_chunks.append(md["text"])
-
-            # Cap at top 5 sermon chunks (matching old bot's retrieval behavior)
-            if len(context_chunks) >= 5:
-                break
-
-        context = "\n\n---\n\n".join(context_chunks)
-
-        # Generate answer with OLD prompt style
-        answer = generate_legacy_answer(context, question)
-
-        # Check for "no info" responses
-        no_info_phrases = [
-            "enough information", "sorry, i do not have",
-            "i'm really sorry", "unable to assist"
-        ]
-        if any(phrase in answer.lower() for phrase in no_info_phrases):
-            return jsonify({"answer": answer})
-
-        # TF-IDF source matching (old bot's signature feature)
-        source_url, random_url, random_category = find_most_similar_source(
-            answer, _sermon_data_cache
-        )
-        final_answer = format_answer_with_sources(
-            answer, source_url, random_url, random_category
-        )
-
-        return jsonify({"answer": final_answer})
-
-    except Exception as e:
-        logger.error(f"Legacy chat error: {e}", exc_info=True)
         return jsonify({"answer": "Something went wrong. Please try again."}), 500
 
 

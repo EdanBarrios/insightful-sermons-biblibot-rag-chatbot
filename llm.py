@@ -69,9 +69,43 @@ def generate_answer(context: str, question: str, has_sermon_content: bool = True
             logger.error(f"❌ Small talk error: {e}")
             return "Hello! I'm BibliBot. Ask me about faith, grace, prayer, or any Biblical topic!"
 
-    # Handle questions WITHOUT sermon content
+    # Handle questions WITHOUT sermon content — answer from general Biblical knowledge
     if not has_sermon_content or not context.strip():
-        return "I don't have any sermons that cover this topic. Try asking about faith, grace, prayer, love, hope, or other Biblical themes from our sermon library."
+        general_system = """You are BibliBot, a Biblical counselor and spiritual guide. Our sermon library does not have specific content on this topic, so answer using your general Biblical and theological knowledge.
+
+ANSWER FORMAT (plain text only, no asterisks or markdown):
+
+Quick Answer:
+[1-2 sentences directly answering the question]
+
+Your Path Forward:
+• [Insight or action] — [weave in a scripture reference naturally]
+• [Insight or action] — [weave in a scripture reference naturally]
+• [Insight or action] — [weave in a scripture reference naturally]
+
+Note: Our sermon library doesn't have specific content on this topic. You might find related sermons by asking about [suggest 1-2 closely related Biblical themes].
+
+RULES:
+- Ground every point in scripture — cite verses naturally, never fabricate sermon titles or authors
+- If you genuinely don't know, say so plainly rather than guessing
+- Keep total response under 250 words
+- Do NOT use ** or any markdown formatting — plain text only"""
+
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": general_system},
+                    {"role": "user", "content": question}
+                ],
+                temperature=0.4,
+                max_tokens=500,
+                top_p=0.9
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"❌ General knowledge fallback error: {e}")
+            return "I don't have sermons on this topic. Try asking about faith, grace, prayer, love, or hope."
 
     bible_section = f"\nBIBLE VERSE:\n{bible_verse_context}\n" if bible_verse_context else ""
 
@@ -125,49 +159,4 @@ RULES:
 
     except Exception as e:
         logger.error(f"❌ LLM generation error: {e}")
-        return "I apologize, but I'm having trouble generating a response right now. Please try again."
-    
-def generate_legacy_answer(context: str, question: str) -> str:
-    """
-    Generate an answer in the old chatbot's style:
-    - Max 8 sentences
-    - Clear, concise, positive
-    - Only from sermon context
-    - No structured format (no Quick Answer / Path Forward sections)
-    """
-    if not client:
-        return "I'm having trouble connecting. Please try again later."
-
-    system = """You are a Biblical chatbot that answers questions exclusively from the collection of sermons in your context from the website Insightful Sermons. If the answer is not found within this specific context, respond concisely with "Sorry, I do not have enough information to answer that question." Your responses should always be clear, concise, positive, and correct, in sentence format, ending with a period. Each response should be limited to a maximum of eight sentences. If a question involves a pronoun or ambiguous reference, ask for clarification without providing any additional commentary. Make sure that your answers never pull from any external data. You cannot use any outside information or previous knowledge."""
-
-    prompt = f"Context: {context}\n\nQuestion: {question}\n\nAnswer:"
-
-    try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.8,
-            max_tokens=400,
-            top_p=0.9
-        )
-        answer = response.choices[0].message.content.strip()
-
-        # Clean up (ported from old format_answer)
-        if "Answer:" in answer:
-            answer = answer.split("Answer:")[-1].strip()
-        answer = answer.replace("1.", "").replace("2.", "").replace("3.", "").replace("4.", "")
-        answer = " ".join(answer.split()).strip(", ")
-
-        if not answer.endswith("."):
-            last_period = answer.rfind(".")
-            if last_period != -1:
-                answer = answer[:last_period + 1]
-
-        return answer
-
-    except Exception as e:
-        logger.error(f"Legacy LLM error: {e}")
         return "I apologize, but I'm having trouble generating a response right now. Please try again."
