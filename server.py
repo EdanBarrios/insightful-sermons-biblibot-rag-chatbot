@@ -10,6 +10,7 @@ load_dotenv()
 from pinecone import Pinecone
 from memory import init_db, save_message, get_recent_messages
 from embeddings import embed
+from llm import generate_answer
 
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index = pc.Index("sermon-index")
