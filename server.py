@@ -204,8 +204,6 @@ def build_formatted_response(answer, sources=None, bible_verses=None):
                 seen.add(url)
 
         sections.append("\n".join(lines))
-    else:
-        sections.append("No specific sermons in our library cover this topic.")
 
     return "\n\n".join(sections).strip()
 
