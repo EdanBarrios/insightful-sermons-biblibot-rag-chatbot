@@ -48,6 +48,9 @@ rag_env/
 *.log
 ingestion/ingestion.log
 
+# Bible source PDFs (already processed into JSON — no need to version these)
+data/NLT_Bible/*.pdf
+
 # Data backups (optional - keep if you want version control)
 # data/*.json
 
