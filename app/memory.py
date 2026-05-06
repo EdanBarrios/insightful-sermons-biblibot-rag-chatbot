@@ -21,6 +21,10 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_session
+            ON messages(session_id, id)
+        """)
         conn.commit()
 
 
@@ -29,6 +33,20 @@ def save_message(session_id: str, role: str, content: str):
         conn.execute(
             "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
             (session_id, role, content)
+        )
+        conn.commit()
+
+
+def save_turn(session_id: str, user_msg: str, assistant_msg: str):
+    """Save user and assistant messages in a single transaction."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+            (session_id, "user", user_msg)
+        )
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+            (session_id, "assistant", assistant_msg)
         )
         conn.commit()
 
@@ -43,11 +61,19 @@ def get_recent_messages(session_id: str, limit: int = 6):
             LIMIT ?
         """, (session_id, limit)).fetchall()
 
-    # reverse so oldest -> newest
     return list(reversed([dict(row) for row in rows]))
 
 
 def clear_session(session_id: str):
     with get_conn() as conn:
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        conn.commit()
+
+
+def prune_old_sessions(days: int = 30):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM messages WHERE created_at < datetime('now', ?)",
+            (f'-{days} days',)
+        )
         conn.commit()
