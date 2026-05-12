@@ -36,25 +36,10 @@ RULES:
 - Keep total response under 300 words
 - Do NOT use ** or any markdown formatting — plain text only"""
 
-_SYSTEM_GENERAL = """You are BibliBot, a Biblical counselor and spiritual guide. Our sermon library does not have specific content on this topic, so answer using your general Biblical and theological knowledge.
-
-ANSWER FORMAT (plain text only, no asterisks or markdown):
-
-Quick Answer:
-[1-2 sentences directly answering the question]
-
-Your Path Forward:
-• [Insight or action] — [weave in a scripture reference naturally]
-• [Insight or action] — [weave in a scripture reference naturally]
-• [Insight or action] — [weave in a scripture reference naturally]
-
-Note: Our sermon library doesn't have specific content on this topic. You might find related sermons by asking about [suggest 1-2 closely related Biblical themes].
-
-RULES:
-- Ground every point in scripture — cite verses naturally, never fabricate sermon titles or authors
-- If you genuinely don't know, say so plainly rather than guessing
-- Keep total response under 250 words
-- Do NOT use ** or any markdown formatting — plain text only"""
+_OUT_OF_SCOPE_MESSAGE = (
+    "That topic is outside the scope of our sermon library. "
+    "Try asking about faith, grace, prayer, forgiveness, relationships, or purpose."
+)
 
 # -------------------- Client --------------------
 
@@ -99,21 +84,7 @@ def generate_answer(context: str, question: str, has_sermon_content: bool = True
             return "Hello! I'm BibliBot. Ask me about faith, grace, prayer, or any Biblical topic!"
 
     if not has_sermon_content or not context.strip():
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": _SYSTEM_GENERAL},
-                    {"role": "user", "content": question}
-                ],
-                temperature=0.4,
-                max_tokens=500,
-                top_p=0.9
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logger.error(f"❌ General knowledge fallback error: {e}")
-            return "I don't have sermons on this topic. Try asking about faith, grace, prayer, love, or hope."
+        return _OUT_OF_SCOPE_MESSAGE
 
     bible_section = f"\nBIBLE VERSE:\n{bible_verse_context}\n" if bible_verse_context else ""
     prompt = f"""SERMON CONTEXT:
