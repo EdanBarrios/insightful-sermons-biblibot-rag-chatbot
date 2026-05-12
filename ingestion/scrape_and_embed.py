@@ -10,8 +10,10 @@ Usage:
 
 import json
 import os
+import random
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -38,7 +40,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler(log_dir / "ingestion.log"),
+        RotatingFileHandler(log_dir / "ingestion.log", maxBytes=1_000_000, backupCount=3),
         logging.StreamHandler(),
     ],
 )
@@ -51,6 +53,7 @@ load_dotenv()
 
 BASE_URL = "https://www.insightfulsermons.com"
 CATEGORIES_URL = f"{BASE_URL}/categories.html"
+MAX_RETRIES = 3
 DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
@@ -90,6 +93,26 @@ def clean_content(content: str) -> str:
     # Normalize whitespace
     content = re.sub(r"\s+", " ", content).strip()
     return content
+
+
+_AUTHOR_PATTERNS = [
+    re.compile(r"^A\s+(.+?)\s+Sermon\s+Summary", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^Sermons?\s+from\s+(.+?)(?:\s*\n|\s{2,}|$)", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^A\s+Lesson\s+from\s+(.+?)(?:\s*\n|\s{2,}|$)", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"Summarized\s+from\s+(?:a\s+)?(?:sermon\s+(?:by|from)\s+)?(.+?)(?:\s*[,.]|\s*https?://|$)", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"Summary\s+from\s+(?:a?\s+)?(?:sermon\s+(?:by|from)\s+)?(.+?)(?:\s*[,.]|\s*https?://|$)", re.IGNORECASE | re.MULTILINE),
+]
+
+
+def extract_author(content: str) -> str | None:
+    """Extract author name from known content attribution patterns."""
+    for pattern in _AUTHOR_PATTERNS:
+        m = pattern.search(content.strip())
+        if m:
+            author = m.group(1).strip().rstrip(".,")
+            if 3 <= len(author) <= 60:
+                return author
+    return None
 
 
 def generate_doc_id(url: str):
@@ -240,11 +263,19 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
             if txt:
                 return txt
 
+            # Tertiary: plain <p> tags
+            p_els = content_root.find_elements(By.CSS_SELECTOR, "p")
+            parts = [p.text.strip() for p in p_els if p.text and p.text.strip()]
+            txt = "\n\n".join(parts).strip()
+            if txt and len(txt) > 200:
+                return txt
+
             return (content_root.text or "").strip()
         except Exception:
             return ""
 
     all_sermons: dict[str, dict] = {}
+    failed_urls: list[tuple[str, str]] = []
 
     try:
         # Step 1: Load /categories.html and collect CATEGORY links only.
@@ -266,7 +297,12 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
 
         # De-dupe categories by URL (some templates duplicate nav items)
         seen_cat: set[str] = set()
-        category_links = [(u, t) for (u, t) in category_links if u not in seen_cat and not seen_cat.add(u)]
+        deduped_cats: list[tuple[str, str]] = []
+        for u, t in category_links:
+            if u not in seen_cat:
+                seen_cat.add(u)
+                deduped_cats.append((u, t))
+        category_links = deduped_cats
 
         logger.info(f"✅ Found {len(category_links)} category links")
         category_url_set = {u for (u, _) in category_links}
@@ -277,7 +313,7 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
         for cat_url, cat_title in category_links:
             try:
                 driver.get(cat_url)
-                time.sleep(0.9)
+                time.sleep(1.0 + random.uniform(-0.1, 0.2))
 
                 # Find the nav anchor that matches this category, then pull its descendant sermon items.
                 cat_anchor = None
@@ -350,7 +386,12 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
 
         # De-dupe sermon URLs globally
         seen_ser: set[str] = set()
-        sermon_links = [(u, t, c) for (u, t, c) in sermon_links if u not in seen_ser and not seen_ser.add(u)]
+        deduped_ser: list[tuple[str, str, str]] = []
+        for u, t, c in sermon_links:
+            if u not in seen_ser:
+                seen_ser.add(u)
+                deduped_ser.append((u, t, c))
+        sermon_links = deduped_ser
 
         logger.info(f"✅ Collected {len(sermon_links)} unique sermon links across categories")
 
@@ -369,10 +410,25 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
 
             logger.info(f"📖 Scraping sermon: {sermon_title[:80]} ({cat_title})")
 
-            try:
-                driver.get(sermon_url)
-                time.sleep(0.7)
+            page_loaded = False
+            for attempt in range(MAX_RETRIES):
+                try:
+                    driver.get(sermon_url)
+                    time.sleep(1.0 + random.uniform(-0.1, 0.2))
+                    page_loaded = True
+                    break
+                except Exception as e:
+                    if attempt < MAX_RETRIES - 1:
+                        logger.warning(f"  ↻ Retry {attempt + 1}/{MAX_RETRIES}: {e}")
+                        time.sleep(1.5 * (attempt + 1))
+                    else:
+                        logger.warning(f"  ❌ Load failed after {MAX_RETRIES} attempts: {e}")
+                        failed_urls.append((sermon_url, f"Load failed: {e}"))
 
+            if not page_loaded:
+                continue
+
+            try:
                 page_title = _get_sermon_title()
                 final_title = page_title or sermon_title
 
@@ -385,7 +441,13 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
                         f"  ⚠️ Content too short (raw={len(raw_content)} cleaned={len(content)}) - skipping - {sermon_url}"
                     )
                     logger.warning(f"  RAW SNIP: {raw_content[:160]!r}")
+                    failed_urls.append((sermon_url, f"Content too short ({len(content)} chars)"))
                     continue
+
+                if len(content) > 50_000:
+                    logger.warning(f"  ⚠️ Content unusually long ({len(content)} chars) - {sermon_url}")
+
+                author = extract_author(content)
 
                 key = final_title
                 if key in all_sermons and all_sermons[key].get("url") != sermon_url:
@@ -395,12 +457,16 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
                     "content": content,
                     "url": sermon_url,
                     "category": cat_title or "General",
+                    "author": author,
                 }
                 scraped += 1
+                if scraped % 25 == 0:
+                    logger.info(f"📊 Progress: {scraped} scraped, {len(failed_urls)} failed so far")
                 logger.info("  ✅ Stored")
 
             except Exception as e:
                 logger.warning(f"Error scraping sermon {sermon_title} ({sermon_url}): {e}")
+                failed_urls.append((sermon_url, f"Extraction error: {e}"))
                 continue
 
         logger.info("=" * 60)
@@ -408,7 +474,12 @@ def scrape_sermons(existing_sermons: dict | None = None) -> dict[str, dict]:
         logger.info(f"   Skipped existing (by URL): {skipped_existing}")
         logger.info(f"   New sermons scraped: {scraped}")
         logger.info(f"   Total sermons collected this run: {len(all_sermons)}")
+        logger.info(f"   Failed/skipped: {len(failed_urls)}")
         logger.info("=" * 60)
+        if failed_urls:
+            logger.warning(f"\n⚠️ Failed/skipped URLs ({len(failed_urls)}):")
+            for furl, reason in failed_urls:
+                logger.warning(f"  - {furl}: {reason}")
 
     except Exception as e:
         logger.error(f"❌ Scraping failed: {e}")
@@ -428,58 +499,74 @@ def embed_and_upsert(sermon_data: dict[str, dict]) -> bool:
     """Embed sermon chunks and upsert to Pinecone"""
     logger.info(f"📊 Embedding and upserting {len(sermon_data)} sermons...")
 
-    vectors: list[dict] = []
+    BATCH_SIZE = 100
+    pending: list[dict] = []
+    total_upserted = 0
+
+    def _flush() -> bool:
+        nonlocal total_upserted
+        if not pending:
+            return True
+        try:
+            index.upsert(vectors=pending)
+            total_upserted += len(pending)
+            logger.info(f"Upserted batch — {total_upserted} vectors so far")
+            pending.clear()
+            return True
+        except Exception as e:
+            logger.error(f"Error upserting batch: {e}")
+            return False
 
     for title, sermon in sermon_data.items():
         try:
             content = sermon.get("content", "")
             url = sermon.get("url", "")
             category = sermon.get("category", "General")
+            author = sermon.get("author") or ""
 
             if not content or len(content) < 50:
                 logger.debug(f"Skipping {title} - content too short")
                 continue
 
             chunks = chunk_text(content)
+            if not chunks:
+                continue
 
-            for i, chunk in enumerate(chunks):
-                doc_id = f"{generate_doc_id(url)}_chunk_{i}"
-                embedding = embedder.encode(chunk).tolist()
+            doc_id_base = generate_doc_id(url)
+            embeddings = embedder.encode(chunks, batch_size=64, show_progress_bar=False)
 
-                vectors.append(
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+                pending.append(
                     {
-                        "id": doc_id,
-                        "values": embedding,
+                        "id": f"{doc_id_base}_chunk_{i}",
+                        "values": embedding.tolist(),
                         "metadata": {
                             "text": chunk,
                             "title": title,
                             "url": url,
                             "category": category,
+                            "author": author,
                             "chunk_index": i,
                             "total_chunks": len(chunks),
                         },
                     }
                 )
+                if len(pending) >= BATCH_SIZE:
+                    if not _flush():
+                        return False
+
         except Exception as e:
             logger.warning(f"Error processing {title}: {e}")
             continue
 
-    logger.info(f"Created {len(vectors)} vectors")
-
-    if not vectors:
-        logger.warning("⚠️ No vectors to upload!")
+    if not _flush():
         return False
 
-    batch_size = 100
-    for i in range(0, len(vectors), batch_size):
-        batch = vectors[i : i + batch_size]
-        try:
-            index.upsert(vectors=batch)
-            progress = f"{min(i + batch_size, len(vectors))}/{len(vectors)}"
-            logger.info(f"Batch {i//batch_size + 1}: Upserted {progress} vectors")
-        except Exception as e:
-            logger.error(f"Error upserting batch: {e}")
-            return False
+    if total_upserted == 0:
+        logger.warning("⚠️ No vectors were uploaded!")
+        return False
+
+    logger.info(f"Created and upserted {total_upserted} vectors total")
 
     try:
         stats = index.describe_index_stats()
@@ -526,8 +613,13 @@ def main() -> None:
 
     save_sermons(current_sermons, str(json_file))
 
-    logger.info("\n📤 Uploading to Pinecone...")
-    success = embed_and_upsert(current_sermons)
+    to_upsert = {**new_sermons, **updated_sermons}
+    if not to_upsert:
+        logger.info("✅ No new or updated sermons — Pinecone already up to date.")
+        success = True
+    else:
+        logger.info(f"\n📤 Uploading {len(to_upsert)} new/updated sermons to Pinecone...")
+        success = embed_and_upsert(to_upsert)
 
     if success:
         logger.info("=" * 60)
