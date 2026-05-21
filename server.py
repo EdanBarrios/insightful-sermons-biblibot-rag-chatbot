@@ -241,18 +241,24 @@ def chat():
             if m.get("hybrid_score", 0) > 0.42 and m.get("score", 0) > 0.33
         ]
 
-        best_bible = max(
-            (m for m in hybrid_results if m.get("metadata", {}).get("type") == "bible"
-             and m.get("score", 0) > 0.38),
-            key=lambda m: m.get("score", 0),
-            default=None
-        )
+        question_kws = extract_keywords(search_query)
+        best_bible = None
+        best_bible_score = 0
+        for m in hybrid_results:
+            md = m.get("metadata", {})
+            if md.get("type") != "bible" or m.get("score", 0) < 0.38:
+                continue
+            ref, text = extract_single_verse(md.get("reference", ""), md.get("text", ""))
+            if not text:
+                continue
+            verse_words = set(re.findall(r'\b\w+\b', text.lower()))
+            if question_kws and not (verse_words & question_kws):
+                continue
+            if m.get("score", 0) > best_bible_score:
+                best_bible_score = m.get("score", 0)
+                best_bible = {"reference": ref, "text": text}
         if best_bible:
-            bmd = best_bible.get("metadata", {})
-            bible_verses.append({
-                "reference": bmd.get("reference", ""),
-                "text": bmd.get("text", "")
-            })
+            bible_verses.append(best_bible)
 
         for match in relevant:
             md = match.get("metadata", {})
