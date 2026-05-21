@@ -37,6 +37,8 @@ _GREETINGS = frozenset([
     "greetings", "good morning", "good afternoon", "good evening",
 ])
 
+_FOLLOWUP_WORDS = frozenset(['anymore', 'more', 'others', 'else', 'another'])
+
 # Pre-compiled regex patterns for author extraction
 _NAME = r'([A-Z][a-zA-Z]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z]+)?)'
 _START_PATTERNS = [re.compile(p) for p in [
@@ -54,6 +56,14 @@ _VERSE_REF_RE = re.compile(r"^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$")
 _NEXT_VERSE_RE = re.compile(r"\b[1-3]?\s?[A-Za-z]+\s+\d+:\d+\b")
 
 # -------------------- Helpers --------------------
+
+def _build_search_query(question: str, history: list) -> str:
+    words = set(question.lower().split())
+    if not history or not (words & _FOLLOWUP_WORDS) or len(question.split()) > 5:
+        return question
+    last_user = next((m['content'] for m in reversed(history) if m['role'] == 'user'), None)
+    return f"{last_user} {question}" if last_user else question
+
 
 def extract_author_from_text(text: str) -> str:
     text = text.strip()
@@ -82,6 +92,9 @@ def extract_keywords(text: str) -> set:
         'for', 'of', 'with', 'by', 'from', 'is', 'are', 'be', 'do',
         'does', 'did', 'have', 'has', 'i', 'you', 'he', 'she', 'it',
         'we', 'they', 'what', 'how', 'why', 'when', 'where', 'does',
+        'about', 'not', 'this', 'that', 'your', 'our', 'all', 'can',
+        'will', 'was', 'were', 'been', 'had', 'its', 'him', 'her',
+        'them', 'who', 'their', 'there',
     }
     return {
         w for w in re.findall(r'\b\w+\b', text.lower())
@@ -191,7 +204,7 @@ def chat():
 
         logger.info(f"Question: {question}")
 
-        if question.lower() in _GREETINGS or len(question.split()) == 1:
+        if question.lower() in _GREETINGS:
             greeting = (
                 "Hello! I'm BibliBot, here to help you explore sermons and the Bible. "
                 "Ask me anything about faith, relationships, or spiritual growth."
@@ -204,8 +217,10 @@ def chat():
             f"{msg['role'].upper()}: {msg['content']}" for msg in history
         )
 
+        search_query = _build_search_query(question, history)
+
         logger.info("Starting embed")
-        vector = embed(question)
+        vector = embed(search_query)
         logger.info("Finished embed")
 
         logger.info("Starting Pinecone query")
@@ -223,7 +238,7 @@ def chat():
 
         relevant = [
             m for m in hybrid_results
-            if m.get("hybrid_score", 0) > 0.5 and m.get("score", 0) > 0.45
+            if m.get("hybrid_score", 0) > 0.45 and m.get("score", 0) > 0.40
         ]
 
         for match in relevant:

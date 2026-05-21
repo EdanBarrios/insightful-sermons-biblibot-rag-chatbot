@@ -55,8 +55,6 @@ except Exception as e:
 def is_sermon_question(question: str) -> bool:
     if question.lower().strip() in _GREETINGS:
         return False
-    if len(question.split()) < 3 and '?' not in question:
-        return False
     return True
 
 
