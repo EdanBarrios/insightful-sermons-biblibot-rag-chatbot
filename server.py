@@ -241,6 +241,19 @@ def chat():
             if m.get("hybrid_score", 0) > 0.42 and m.get("score", 0) > 0.33
         ]
 
+        best_bible = max(
+            (m for m in hybrid_results if m.get("metadata", {}).get("type") == "bible"
+             and m.get("score", 0) > 0.38),
+            key=lambda m: m.get("score", 0),
+            default=None
+        )
+        if best_bible:
+            bmd = best_bible.get("metadata", {})
+            bible_verses.append({
+                "reference": bmd.get("reference", ""),
+                "text": bmd.get("text", "")
+            })
+
         for match in relevant:
             md = match.get("metadata", {})
             doc_type = md.get("type", "sermon")
@@ -258,13 +271,6 @@ def chat():
                     context_chunks.append(f"[{', '.join(header_parts)}]\n{md['text']}")
                 else:
                     context_chunks.append(md["text"])
-
-            if doc_type == "bible" and not bible_verses:
-                if match.get("keyword_score", 0) > 0.6:
-                    bible_verses.append({
-                        "reference": md.get("reference", ""),
-                        "text": md.get("text", "")
-                    })
 
             if doc_type != "bible":
                 url = md.get("url", "")
