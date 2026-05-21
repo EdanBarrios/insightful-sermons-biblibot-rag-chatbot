@@ -238,7 +238,7 @@ def chat():
 
         relevant = [
             m for m in hybrid_results
-            if m.get("hybrid_score", 0) > 0.45 and m.get("score", 0) > 0.40
+            if m.get("hybrid_score", 0) > 0.42 and m.get("score", 0) > 0.38
         ]
 
         for match in relevant:
