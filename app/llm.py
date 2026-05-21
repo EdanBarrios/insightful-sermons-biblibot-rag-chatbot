@@ -27,6 +27,7 @@ Theological Foundation:
 
 RULES:
 - Use ONLY content drawn from the sermon context above
+- Only cite Bible verses that are explicitly mentioned in the SERMON CONTEXT or BIBLE VERSE sections provided. Do not add verses from your own knowledge.
 - Weave scripture naturally into bullet points — don't just append citations at the end
 - If a Bible verse is provided, integrate it into the most fitting bullet point
 - Reference sermon authors by name when the context includes one
