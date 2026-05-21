@@ -228,7 +228,7 @@ def chat():
         logger.info("Finished Pinecone query")
 
         logger.info("Starting hybrid search ranking")
-        hybrid_results = hybrid_search(res, question)
+        hybrid_results = hybrid_search(res, search_query)
         logger.info("Finished hybrid search ranking")
 
         sources = []
