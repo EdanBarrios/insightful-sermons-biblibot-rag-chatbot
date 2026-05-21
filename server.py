@@ -224,7 +224,7 @@ def chat():
         logger.info("Finished embed")
 
         logger.info("Starting Pinecone query")
-        res = index.query(vector=vector, top_k=10, include_metadata=True)
+        res = index.query(vector=vector, top_k=15, include_metadata=True)
         logger.info("Finished Pinecone query")
 
         logger.info("Starting hybrid search ranking")
@@ -238,7 +238,7 @@ def chat():
 
         relevant = [
             m for m in hybrid_results
-            if m.get("hybrid_score", 0) > 0.42 and m.get("score", 0) > 0.38
+            if m.get("hybrid_score", 0) > 0.42 and m.get("score", 0) > 0.33
         ]
 
         for match in relevant:
