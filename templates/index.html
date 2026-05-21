@@ -260,6 +260,12 @@
     </div>
 
     <script>
+        // Per-tab session ID
+        if (!sessionStorage.getItem('session_id')) {
+            sessionStorage.setItem('session_id', crypto.randomUUID());
+        }
+        const SESSION_ID = sessionStorage.getItem('session_id');
+
         // Get elements
         const chatIcon = document.getElementById('chatIcon');
         const chatBox = document.getElementById('chatBox');
@@ -307,7 +313,7 @@
                 const response = await fetch('http://127.0.0.1:5001/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message })
+                    body: JSON.stringify({ message, session_id: SESSION_ID })
                 });
 
                 if (!response.ok) {
