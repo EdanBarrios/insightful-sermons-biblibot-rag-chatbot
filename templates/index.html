@@ -333,9 +333,14 @@
             }
         }
 
-        // Function to convert URLs in text to clickable links
+        // Function to convert markdown links and bare URLs into clickable links
         function linkify(text) {
-            const urlPattern = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+            // [label](url) first, so its URL isn't consumed by the bare-URL pass
+            text = text.replace(
+                /\[([^\]]+)\]\(([^)]+)\)/g,
+                '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+            );
+            const urlPattern = /(?<!["'>])(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
             return text.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
         }
 

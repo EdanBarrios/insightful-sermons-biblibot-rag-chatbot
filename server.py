@@ -1,8 +1,6 @@
-import json
 import os
 import logging
 import re
-from pathlib import Path
 
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
@@ -11,7 +9,6 @@ from pinecone import Pinecone
 
 from app.memory import init_db, save_turn, get_recent_messages
 from app.embeddings import embed
-from app.llm import generate_answer
 
 load_dotenv()
 
@@ -52,8 +49,14 @@ _END_PATTERNS = [re.compile(p) for p in [
     rf'\sby\s+{_NAME}\s*(?:https?://)',
 ]]
 
-_VERSE_REF_RE = re.compile(r"^([1-3]?\s?[A-Za-z]+\s+\d+:\d+)\s+(.*)$")
-_NEXT_VERSE_RE = re.compile(r"\b[1-3]?\s?[A-Za-z]+\s+\d+:\d+\b")
+_MAX_SERMONS = 2
+
+_CLOSING_LINE = "If you'd like to search for other sermons, feel free to ask."
+
+_NO_MATCH_MESSAGE = (
+    "I don't have sermons matching that search. "
+    "If you'd like to search for something else, feel free to ask."
+)
 
 # -------------------- Helpers --------------------
 
@@ -134,50 +137,25 @@ def hybrid_search(semantic_results, question: str) -> list:
     return scored_matches
 
 
-def extract_single_verse(reference: str, verse_text: str) -> tuple:
-    cleaned = " ".join((verse_text or "").split()).strip()
-    ref = (reference or "").strip()
+def build_formatted_response(sources: list) -> str:
+    """Sermon discovery output: title, speaker, link. No generated prose."""
+    if not sources:
+        return _NO_MATCH_MESSAGE
 
-    if not cleaned:
-        return ref, ""
+    intro = (
+        "Here is a sermon on that topic:" if len(sources) == 1
+        else "Here are sermons on that topic:"
+    )
 
-    m = _VERSE_REF_RE.match(cleaned)
-    if m:
-        ref = m.group(1).strip()
-        remainder = m.group(2).strip()
-    else:
-        remainder = cleaned
+    blocks = []
+    for source in sources:
+        lines = [source["title"]]
+        if source.get("author"):
+            lines.append(source["author"])
+        lines.append(f'[Read the sermon]({source["url"]})')
+        blocks.append("\n".join(lines))
 
-    next_marker = _NEXT_VERSE_RE.search(remainder)
-    if next_marker:
-        remainder = remainder[: next_marker.start()].strip()
-
-    return ref, remainder
-
-
-def build_formatted_response(answer: str, sources=None, bible_verses=None) -> str:
-    sections = [answer.strip()]
-
-    if bible_verses:
-        ref, text = extract_single_verse(
-            bible_verses[0].get("reference", ""),
-            bible_verses[0].get("text", "")
-        )
-        if text:
-            sections.append(f'Bible Verse:\n"{text}"\n— {ref}')
-
-    if sources:
-        lines = ["Related sermons:"]
-        seen = set()
-        for source in sources[:2]:
-            title = source.get("title", "Sermon").replace('"', "").strip()
-            url = source.get("url", "").strip()
-            if url and url not in seen:
-                lines.append(f"- [{title}]({url})")
-                seen.add(url)
-        sections.append("\n".join(lines))
-
-    return "\n\n".join(sections).strip()
+    return "\n\n".join([intro, *blocks, _CLOSING_LINE])
 
 
 # -------------------- Routes --------------------
@@ -206,16 +184,13 @@ def chat():
 
         if question.lower() in _GREETINGS:
             greeting = (
-                "Hello! I'm BibliBot, here to help you explore sermons and the Bible. "
-                "Ask me anything about faith, relationships, or spiritual growth."
+                "Hello! I'm BibliBot. I can help you find sermons on a topic, "
+                "speaker, or Bible theme. What are you looking for?"
             )
             save_turn(session_id, question, greeting)
             return jsonify({"answer": greeting})
 
         history = get_recent_messages(session_id, limit=6)
-        history_text = "\n".join(
-            f"{msg['role'].upper()}: {msg['content']}" for msg in history
-        )
 
         search_query = _build_search_query(question, history)
 
@@ -231,88 +206,36 @@ def chat():
         hybrid_results = hybrid_search(res, search_query)
         logger.info("Finished hybrid search ranking")
 
-        sources = []
-        bible_verses = []
-        context_chunks = []
-        seen_urls = set()
-
         relevant = [
             m for m in hybrid_results
             if m.get("hybrid_score", 0) > 0.42 and m.get("score", 0) > 0.33
         ]
 
-        question_kws = extract_keywords(search_query)
-        best_bible = None
-        best_bible_score = 0
-        for m in hybrid_results:
-            md = m.get("metadata", {})
-            if md.get("type") != "bible" or m.get("score", 0) < 0.38:
-                continue
-            ref, text = extract_single_verse(md.get("reference", ""), md.get("text", ""))
-            if not text:
-                continue
-            verse_words = set(re.findall(r'\b\w+\b', text.lower()))
-            if question_kws and not (verse_words & question_kws):
-                continue
-            if m.get("score", 0) > best_bible_score:
-                best_bible_score = m.get("score", 0)
-                best_bible = {"reference": ref, "text": text}
-        if best_bible:
-            bible_verses.append(best_bible)
+        sources = []
+        seen_urls = set()
 
         for match in relevant:
             md = match.get("metadata", {})
-            doc_type = md.get("type", "sermon")
+            if md.get("type", "sermon") == "bible":
+                continue
 
-            if "text" in md:
-                if doc_type != "bible":
-                    title = md.get("title", "").strip()
-                    category = md.get("category", "").strip()
-                    author = extract_author_from_text(md["text"])
-                    header_parts = [f'Sermon: "{title}"']
-                    if author:
-                        header_parts.append(f"by {author}")
-                    if category:
-                        header_parts.append(f"[{category}]")
-                    context_chunks.append(f"[{', '.join(header_parts)}]\n{md['text']}")
-                else:
-                    context_chunks.append(md["text"])
+            url = md.get("url", "").strip()
+            if not url or url in seen_urls:
+                continue
 
-            if doc_type != "bible":
-                url = md.get("url", "")
-                if url and url not in seen_urls:
-                    sources.append({"title": md.get("title", "Sermon"), "url": url})
-                    seen_urls.add(url)
+            sources.append({
+                "title": md.get("title", "").replace('"', "").strip() or "Sermon",
+                "author": extract_author_from_text(md.get("text", "")),
+                "url": url,
+            })
+            seen_urls.add(url)
 
-        context = "\n\n---\n\n".join(context_chunks)
-        combined_context = (
-            f"Conversation history:\n{history_text}\n\nRelevant context:\n{context}"
-            if history_text else context
-        )
+            if len(sources) == _MAX_SERMONS:
+                break
 
-        bible_verse_context = ""
-        if bible_verses:
-            ref, text = extract_single_verse(
-                bible_verses[0].get("reference", ""),
-                bible_verses[0].get("text", "")
-            )
-            if text:
-                bible_verse_context = f'{ref}: "{text}"'
+        logger.info(f"Returning {len(sources)} sermon(s)")
 
-        logger.info("Starting LLM generation")
-        answer = generate_answer(
-            combined_context, question,
-            has_sermon_content=bool(context_chunks),
-            bible_verse_context=bible_verse_context
-        )
-        logger.info("Finished LLM generation")
-
-        if not answer:
-            answer = "I'm sorry, I couldn't generate a response. Please try again."
-
-        final_answer = build_formatted_response(
-            answer=answer, sources=sources, bible_verses=bible_verses
-        )
+        final_answer = build_formatted_response(sources)
         save_turn(session_id, question, final_answer)
 
         return jsonify({"answer": final_answer})
