@@ -8,6 +8,11 @@ Usage:
 
 import os
 import sys
+
+# The repo root has to be importable before any test runs, not just before the
+# last one — otherwise every "from app...." below fails on the import alone.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from dotenv import load_dotenv
 
 # Colors for terminal output
@@ -176,8 +181,6 @@ def test_server_imports():
     print(f"\n{Colors.BLUE}=== Testing Server Imports ==={Colors.END}")
     
     try:
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        
         import server
         print_test("server.py imports successfully", True)
         

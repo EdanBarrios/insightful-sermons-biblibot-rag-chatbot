@@ -1,0 +1,683 @@
+<style>
+
+/* BibliBot Widget Styles */
+
+.biblibot-widget-container {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  z-index: 1000000 !important;
+}
+
+@media (max-width: 768px) {
+  .biblibot-widget-container {
+    right: 10px !important;
+    bottom: 10px !important;
+  }
+}
+
+.biblibot-chat-icon {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.5);
+  transition: all 0.3s ease;
+  animation: biblibot-pulse 2s infinite;
+  visibility: visible;
+  opacity: 1;
+}
+
+.biblibot-chat-icon:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 30px rgba(102, 126, 234, 0.7);
+}
+
+.biblibot-chat-icon.hidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  animation: none;
+}
+
+@keyframes biblibot-pulse {
+  0%, 100% {
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.5);
+  }
+  50% {
+    box-shadow: 0 4px 30px rgba(102, 126, 234, 0.8);
+  }
+}
+
+.biblibot-chat-icon img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.biblibot-chat-box {
+  display: none;
+  flex-direction: column;
+  width: 380px;
+  height: 700px;
+  max-height: calc(100vh - 120px);
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  margin-bottom: 15px;
+  overflow: hidden;
+  animation: biblibot-slideup 0.3s ease-out;
+  position: relative;
+  z-index: 100000;
+}
+
+@keyframes biblibot-slideup {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.biblibot-chat-box.open {
+  display: flex;
+}
+
+@media (max-width: 768px) {
+  .biblibot-chat-box {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 100px);
+    max-height: 600px;
+  }
+}
+
+.biblibot-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 18px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.biblibot-header h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.biblibot-intro {
+  padding: 14px 20px;
+  background: #eef1fb;
+  border-bottom: 1px solid #dbe1f5;
+  color: #34405c;
+  font-size: 13.5px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+.biblibot-close {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 5px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  transition: background 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100010;
+  position: relative;
+  pointer-events: auto !important;
+}
+
+.biblibot-close:hover {
+  background: rgba(255,255,255,0.3);
+  transform: scale(1.1);
+}
+
+.biblibot-close:active {
+  transform: scale(0.95);
+}
+
+.biblibot-messages {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  background: #f8f9fa;
+}
+
+.biblibot-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.biblibot-messages::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.biblibot-messages::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+.biblibot-message {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  animation: biblibot-fadein 0.3s ease-out;
+}
+
+@keyframes biblibot-fadein {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.biblibot-message-text {
+  padding: 12px 16px;
+  border-radius: 18px;
+  max-width: 85%;
+  word-wrap: break-word;
+  line-height: 1.5;
+  font-size: 15px;
+}
+
+.biblibot-message.user .biblibot-message-text {
+  align-self: flex-end;
+  background: #667eea;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.biblibot-message.bot .biblibot-message-text {
+  align-self: flex-start;
+  background: white;
+  color: #333;
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.biblibot-message-text strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.biblibot-message-text a {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.biblibot-message-text a:hover {
+  text-decoration: underline;
+}
+
+.biblibot-typing {
+  display: none;
+  align-self: flex-start;
+  padding: 12px 16px;
+  background: white;
+  border-radius: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.biblibot-typing.show {
+  display: block;
+}
+
+.biblibot-typing span {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 3px;
+  background: #667eea;
+  border-radius: 50%;
+  animation: biblibot-blink 1.4s infinite;
+}
+
+.biblibot-typing span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.biblibot-typing span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes biblibot-blink {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+.biblibot-input-area {
+  display: flex;
+  padding: 15px;
+  border-top: 1px solid #e0e0e0;
+  background: white;
+  gap: 10px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 100010;
+}
+
+.biblibot-input {
+  flex: 1;
+  border: 2px solid #e0e0e0;
+  border-radius: 24px;
+  padding: 12px 18px;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  font-size: 15px;
+  max-height: 100px;
+  transition: border-color 0.3s;
+}
+
+.biblibot-input:focus {
+  border-color: #667eea;
+}
+
+.biblibot-send {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  border: none;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  flex-shrink: 0;
+  pointer-events: auto !important;
+  z-index: 100011 !important;
+  position: relative;
+}
+
+.biblibot-send:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.biblibot-send:active {
+  transform: scale(0.95);
+}
+
+.biblibot-send svg {
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
+
+</style>
+
+<!-- BIBLIBOT -->
+<div class="biblibot-widget-container">
+  <div class="biblibot-chat-box" id="biblibot-box">
+    <div class="biblibot-header">
+      <h3>BibliBot</h3>
+      <button
+        class="biblibot-close"
+        id="biblibot-close"
+        aria-label="Close chat"
+      >&times;</button>
+    </div>
+    <div class="biblibot-intro">
+      Looking for something specific? Ask me!
+      I can find sermon summaries based on
+      title, subject, or author.
+      Or check out the categories tab above.
+    </div>
+    <div class="biblibot-messages" id="biblibot-messages"></div>
+    <div class="biblibot-typing" id="biblibot-typing">
+      <span></span><span></span><span></span>
+    </div>
+    <div class="biblibot-input-area">
+      <textarea
+        class="biblibot-input"
+        id="biblibot-input"
+        placeholder="Search sermons..."
+        rows="1"
+        aria-label="Message input"
+      ></textarea>
+      <div
+        class="biblibot-send"
+        id="biblibot-send"
+        role="button"
+        aria-label="Send message"
+        tabindex="0"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+  <div
+    class="biblibot-chat-icon"
+    id="biblibot-icon"
+    role="button"
+    aria-label="Open chat"
+    tabindex="0"
+  >
+    <img
+      src="https://biblibot-api.onrender.com/static/new_chatbot_logo.png?v=2"
+      alt="Chat"
+    >
+  </div>
+</div>
+
+<!-- BIBLIBOT JAVASCRIPT -->
+<script>
+(function () {
+  'use strict';
+
+  var API_URL = 'https://biblibot-api.onrender.com/chat';
+  var HISTORY_KEY = 'biblibot_chat_history';
+  var SESSION_KEY = 'biblibot_session_id';
+
+  var _historyCache = null;
+
+  function getChatHistory() {
+    if (_historyCache) {
+      return _historyCache;
+    }
+    try {
+      var raw = localStorage.getItem(HISTORY_KEY);
+      _historyCache = JSON.parse(raw || '[]');
+    } catch (e) {
+      _historyCache = [];
+    }
+    return _historyCache;
+  }
+
+  function saveChatHistory(history) {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    } catch (e) {
+      return;
+    }
+  }
+
+  function appendToChatHistory(text, sender) {
+    var history = getChatHistory();
+    history.push({ text: text, sender: sender });
+    if (history.length > 20) {
+      history.splice(0, history.length - 20);
+    }
+    saveChatHistory(history);
+  }
+
+  function getSessionId() {
+    var sessionId = null;
+    try {
+      sessionId = localStorage.getItem(SESSION_KEY);
+    } catch (e) {
+      sessionId = null;
+    }
+    if (!sessionId) {
+      sessionId = 'session_' +
+        Math.random().toString(36).slice(2) +
+        Date.now();
+      try {
+        localStorage.setItem(SESSION_KEY, sessionId);
+      } catch (e) {
+        return sessionId;
+      }
+    }
+    return sessionId;
+  }
+
+  function initBibliBot() {
+    var widget = document.querySelector('.biblibot-widget-container');
+    if (!widget) {
+      setTimeout(initBibliBot, 250);
+      return;
+    }
+
+    if (widget.parentNode !== document.body) {
+      document.body.appendChild(widget);
+    }
+
+    if (widget.getAttribute('data-biblibot-bound') === '1') {
+      return;
+    }
+    widget.setAttribute('data-biblibot-bound', '1');
+
+    var icon = widget.querySelector('#biblibot-icon');
+    var box = widget.querySelector('#biblibot-box');
+    var close = widget.querySelector('#biblibot-close');
+    var input = widget.querySelector('#biblibot-input');
+    var send = widget.querySelector('#biblibot-send');
+    var messages = widget.querySelector('#biblibot-messages');
+    var typing = widget.querySelector('#biblibot-typing');
+
+    if (!icon || !box || !input || !send || !messages) {
+      return;
+    }
+
+    var isSending = false;
+
+    function openChat() {
+      box.classList.add('open');
+      icon.classList.add('hidden');
+      input.focus();
+    }
+
+    function closeChat() {
+      box.classList.remove('open');
+      icon.classList.remove('hidden');
+    }
+
+    function scrollToBottom() {
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function convertMarkdownLinks(text) {
+      var pattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+      var replacement = '<a href="$2" target="_blank" ' +
+        'rel="noopener noreferrer">$1</a>';
+      return text.replace(pattern, replacement);
+    }
+
+    function addMessage(text, sender, persist) {
+      var msgDiv = document.createElement('div');
+      msgDiv.className = 'biblibot-message ' + sender;
+
+      var textDiv = document.createElement('div');
+      textDiv.className = 'biblibot-message-text';
+
+      var senderName = 'BibliBot';
+      if (sender === 'user') {
+        senderName = 'You';
+      }
+
+      var safeText = escapeHtml((text || '').trim());
+      safeText = safeText.replace(/\n/g, '<br>');
+      var processedText = convertMarkdownLinks(safeText);
+
+      textDiv.innerHTML = '<strong>' + senderName + '</strong>' +
+        processedText;
+
+      msgDiv.appendChild(textDiv);
+      messages.appendChild(msgDiv);
+      scrollToBottom();
+
+      if (persist !== false) {
+        appendToChatHistory(text, sender);
+      }
+    }
+
+    function renderSavedChatHistory() {
+      var history = getChatHistory();
+      if (!history.length) {
+        return;
+      }
+      messages.innerHTML = '';
+      for (var i = 0; i < history.length; i++) {
+        addMessage(history[i].text, history[i].sender, false);
+      }
+    }
+
+    function sendMessage() {
+      var message = input.value.trim();
+      if (!message || isSending) {
+        return;
+      }
+
+      isSending = true;
+
+      addMessage(message, 'user');
+      input.value = '';
+      input.style.height = 'auto';
+
+      if (typing) {
+        typing.classList.add('show');
+      }
+      scrollToBottom();
+
+      var payload = JSON.stringify({
+        message: message,
+        session_id: getSessionId()
+      });
+
+      fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: payload
+      }).then(function (response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+        return response.json();
+      }).then(function (data) {
+        if (typing) {
+          typing.classList.remove('show');
+        }
+        var answer = data.answer;
+        if (!answer) {
+          answer = 'Hmm, no answer came back. Try again.';
+        }
+        addMessage(answer, 'bot');
+      })['catch'](function (err) {
+        if (typing) {
+          typing.classList.remove('show');
+        }
+        addMessage(
+          'I am having trouble connecting right now. ' +
+          'Please try again in a moment.',
+          'bot'
+        );
+        if (window.console) {
+          console.error('BibliBot error:', err);
+        }
+      }).then(function () {
+        isSending = false;
+      });
+    }
+
+    renderSavedChatHistory();
+
+    if (!getChatHistory().length) {
+      // Short on purpose: the standing intro above the conversation
+      // already explains what the bot can search by.
+      addMessage(
+        "Hello! I'm BibliBot. What are you looking for?",
+        'bot'
+      );
+    }
+
+    icon.addEventListener('click', function (e) {
+      e.preventDefault();
+      openChat();
+    });
+
+    icon.addEventListener('keypress', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openChat();
+      }
+    });
+
+    if (close) {
+      close.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeChat();
+      });
+    }
+
+    send.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      sendMessage();
+    });
+
+    send.addEventListener('keypress', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    input.addEventListener('input', function () {
+      this.style.height = 'auto';
+      var h = this.scrollHeight;
+      if (h > 100) {
+        h = 100;
+      }
+      this.style.height = h + 'px';
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initBibliBot);
+  } else {
+    initBibliBot();
+  }
+})();
+</script>

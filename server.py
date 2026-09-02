@@ -1,6 +1,5 @@
 import os
 import logging
-import re
 
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
@@ -9,6 +8,8 @@ from pinecone import Pinecone
 
 from app.memory import init_db, save_turn, get_recent_messages
 from app.embeddings import embed
+from app.catalog import load_catalog, content_words, tokenize
+from app.search import find_sermons, previously_shown
 
 load_dotenv()
 
@@ -25,6 +26,8 @@ CORS(app)
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 index = pc.Index("sermon-index")
 
+catalog = load_catalog()
+
 init_db()
 
 # -------------------- Constants --------------------
@@ -34,22 +37,16 @@ _GREETINGS = frozenset([
     "greetings", "good morning", "good afternoon", "good evening",
 ])
 
-_FOLLOWUP_WORDS = frozenset(['anymore', 'more', 'others', 'else', 'another'])
+# "any more?" carries no subject of its own — it means more of whatever was
+# asked for last.
+_FOLLOWUP_WORDS = frozenset([
+    "anymore", "more", "others", "other", "else", "another", "next", "again",
+])
 
-# Pre-compiled regex patterns for author extraction
-_NAME = r'([A-Z][a-zA-Z]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z]+)?)'
-_START_PATTERNS = [re.compile(p) for p in [
-    rf'^A\s+{_NAME}\s+Sermon\s+Summary',
-    rf'^A\s+Lesson\s+from\s+{_NAME}',
-    rf'^of\s+a\s+[Ll]esson\s+from\s+{_NAME}',
-]]
-_END_PATTERNS = [re.compile(p) for p in [
-    rf'from\s+a\s+{_NAME}\s+[Ss]ermon',
-    rf'[Ss]ermon\s+by\s+{_NAME}',
-    rf'\sby\s+{_NAME}\s*(?:https?://)',
-]]
+_MAX_SERMONS = 3
 
-_MAX_SERMONS = 2
+# Enough turns to page through a prolific author a few results at a time.
+_HISTORY_LIMIT = 12
 
 _CLOSING_LINE = "If you'd like to search for other sermons, feel free to ask."
 
@@ -58,104 +55,97 @@ _NO_MATCH_MESSAGE = (
     "If you'd like to search for something else, feel free to ask."
 )
 
+_GREETING_MESSAGE = (
+    "Hello! I'm BibliBot. I can find sermon summaries by title, subject, or "
+    "author. What are you looking for?"
+)
+
 # -------------------- Helpers --------------------
 
-def _build_search_query(question: str, history: list) -> str:
-    words = set(question.lower().split())
-    if not history or not (words & _FOLLOWUP_WORDS) or len(question.split()) > 5:
+def _is_followup(question: str) -> bool:
+    # Tokenize rather than split: "any more?" has to count, punctuation and all.
+    words = tokenize(question)
+    return bool(set(words) & _FOLLOWUP_WORDS) and len(words) <= 5
+
+
+def build_search_query(question: str, history: list) -> str:
+    """
+    Resolve a bare follow-up against what was asked before.
+
+    "any more?" after "Jonathan Edwards" has to search for Jonathan Edwards, and
+    the turn before that may itself have been "more", so walk back to the last
+    message that actually named a subject.
+    """
+    if not history or not _is_followup(question):
         return question
-    last_user = next((m['content'] for m in reversed(history) if m['role'] == 'user'), None)
-    return f"{last_user} {question}" if last_user else question
+
+    for message in reversed(history):
+        if message["role"] != "user":
+            continue
+        previous = message["content"]
+        if not _is_followup(previous) and content_words(previous):
+            logger.info(f"Follow-up resolved against earlier question: {previous!r}")
+            return previous
+
+    return question
 
 
-def extract_author_from_text(text: str) -> str:
-    text = text.strip()
-
-    for pattern in _START_PATTERNS:
-        m = pattern.match(text)
-        if m:
-            author = m.group(1).strip()
-            if author:
-                return author
-
-    tail = text[-300:] if len(text) > 300 else text
-    for pattern in _END_PATTERNS:
-        m = pattern.search(tail)
-        if m:
-            author = m.group(1).strip()
-            if author:
-                return author
-
-    return ""
+def _sermon_block(sermon: dict) -> str:
+    lines = [sermon["title"]]
+    authors = sermon.get("authors") or []
+    if authors:
+        lines.append(", ".join(authors))
+    lines.append(f'[Read the sermon]({sermon["url"]})')
+    return "\n".join(lines)
 
 
-def extract_keywords(text: str) -> set:
-    stop_words = {
-        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to',
-        'for', 'of', 'with', 'by', 'from', 'is', 'are', 'be', 'do',
-        'does', 'did', 'have', 'has', 'i', 'you', 'he', 'she', 'it',
-        'we', 'they', 'what', 'how', 'why', 'when', 'where', 'does',
-        'about', 'not', 'this', 'that', 'your', 'our', 'all', 'can',
-        'will', 'was', 'were', 'been', 'had', 'its', 'him', 'her',
-        'them', 'who', 'their', 'there',
-    }
-    return {
-        w for w in re.findall(r'\b\w+\b', text.lower())
-        if len(w) > 2 and w not in stop_words
-    }
+def _subject(found: dict) -> str:
+    if found["kind"] == "author":
+        return f"by {found['label']}"
+    if found["kind"] == "category":
+        return f"in the {found['label']} category"
+    return "on that topic"
 
 
-def calculate_keyword_score(text: str, keywords: set) -> float:
-    """Word-boundary keyword match — avoids substring false positives."""
-    if not keywords:
-        return 0
-    text_words = set(re.findall(r'\b\w+\b', text.lower()))
-    return len(keywords & text_words) / len(keywords)
+def _intro(found: dict, is_followup: bool) -> str:
+    """
+    Say how much more there is.
+
+    Peter had to coax the bot into showing a second Jonathan Edwards sermon
+    because nothing ever hinted there were fourteen of them.
+    """
+    count = len(found["results"])
+    total = found["total"]
+    subject = _subject(found)
+
+    lead = "Here is" if count == 1 else "Here are"
+    more = "more " if is_followup else ""
+
+    if total > count:
+        return f"{lead} {count} {more}of the {total} sermons {subject}:"
+    if count == 1:
+        return f"Here is {'one more ' if is_followup else 'a '}sermon {subject}:"
+    return f"{lead} {count} {more}sermons {subject}:"
 
 
-def hybrid_search(semantic_results, question: str) -> list:
-    question_keywords = extract_keywords(question)
-    logger.info(f"Question keywords: {sorted(question_keywords)}")
-
-    scored_matches = []
-    for match in semantic_results.get("matches", []):
-        semantic_score = match.get("score", 0)
-        metadata = match.get("metadata", {})
-        text = (metadata.get("text", "") + " " + metadata.get("title", "")).lower()
-        keyword_score = calculate_keyword_score(text, question_keywords)
-        match["hybrid_score"] = (semantic_score * 0.6) + (keyword_score * 0.4)
-        match["keyword_score"] = keyword_score
-        scored_matches.append(match)
-
-    scored_matches.sort(key=lambda m: m.get("hybrid_score", 0), reverse=True)
-
-    if scored_matches:
-        top = scored_matches[0]
-        logger.info(f"Top match hybrid score: {top.get('hybrid_score', 'N/A')}")
-        logger.info(f"Top match keyword score: {top.get('keyword_score', 'N/A')}")
-
-    return scored_matches
-
-
-def build_formatted_response(sources: list) -> str:
+def build_formatted_response(found: dict, is_followup: bool) -> str:
     """Sermon discovery output: title, speaker, link. No generated prose."""
-    if not sources:
+    if found["exhausted"]:
+        return (
+            f"That's all {found['total']} sermons I have {_subject(found)}. "
+            "If you'd like to search for something else, feel free to ask."
+        )
+
+    if not found["results"]:
         return _NO_MATCH_MESSAGE
 
-    intro = (
-        "Here is a sermon on that topic:" if len(sources) == 1
-        else "Here are sermons on that topic:"
+    closing = (
+        "Ask for more to see the rest."
+        if found["remaining"] > len(found["results"])
+        else _CLOSING_LINE
     )
-
-    blocks = []
-    for source in sources:
-        lines = [source["title"]]
-        if source.get("author"):
-            lines.append(source["author"])
-        lines.append(f'[Read the sermon]({source["url"]})')
-        blocks.append("\n".join(lines))
-
-    return "\n\n".join([intro, *blocks, _CLOSING_LINE])
+    blocks = [_sermon_block(s) for s in found["results"]]
+    return "\n\n".join([_intro(found, is_followup), *blocks, closing])
 
 
 # -------------------- Routes --------------------
@@ -167,7 +157,7 @@ def home():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "sermons": len(catalog.sermons)})
 
 
 @app.route("/chat", methods=["POST"])
@@ -183,62 +173,27 @@ def chat():
         logger.info(f"Question: {question}")
 
         if question.lower() in _GREETINGS:
-            greeting = (
-                "Hello! I'm BibliBot. I can help you find sermons on a topic, "
-                "speaker, or Bible theme. What are you looking for?"
-            )
-            save_turn(session_id, question, greeting)
-            return jsonify({"answer": greeting})
+            save_turn(session_id, question, _GREETING_MESSAGE)
+            return jsonify({"answer": _GREETING_MESSAGE})
 
-        history = get_recent_messages(session_id, limit=6)
+        history = get_recent_messages(session_id, limit=_HISTORY_LIMIT)
+        is_followup = _is_followup(question)
+        search_query = build_search_query(question, history)
 
-        search_query = _build_search_query(question, history)
+        # Only skip past what has already been shown when the person is asking
+        # for more of the same. A fresh search should start from the best match
+        # even if it was mentioned earlier.
+        exclude = previously_shown(history) if is_followup else set()
 
-        logger.info("Starting embed")
-        vector = embed(search_query)
-        logger.info("Finished embed")
+        found = find_sermons(
+            catalog, index, embed, search_query, exclude, _MAX_SERMONS
+        )
+        logger.info(f"Returning {len(found['results'])} sermon(s) of {found['total']}")
 
-        logger.info("Starting Pinecone query")
-        res = index.query(vector=vector, top_k=15, include_metadata=True)
-        logger.info("Finished Pinecone query")
+        answer = build_formatted_response(found, is_followup)
+        save_turn(session_id, question, answer)
 
-        logger.info("Starting hybrid search ranking")
-        hybrid_results = hybrid_search(res, search_query)
-        logger.info("Finished hybrid search ranking")
-
-        relevant = [
-            m for m in hybrid_results
-            if m.get("hybrid_score", 0) > 0.42 and m.get("score", 0) > 0.33
-        ]
-
-        sources = []
-        seen_urls = set()
-
-        for match in relevant:
-            md = match.get("metadata", {})
-            if md.get("type", "sermon") == "bible":
-                continue
-
-            url = md.get("url", "").strip()
-            if not url or url in seen_urls:
-                continue
-
-            sources.append({
-                "title": md.get("title", "").replace('"', "").strip() or "Sermon",
-                "author": extract_author_from_text(md.get("text", "")),
-                "url": url,
-            })
-            seen_urls.add(url)
-
-            if len(sources) == _MAX_SERMONS:
-                break
-
-        logger.info(f"Returning {len(sources)} sermon(s)")
-
-        final_answer = build_formatted_response(sources)
-        save_turn(session_id, question, final_answer)
-
-        return jsonify({"answer": final_answer})
+        return jsonify({"answer": answer})
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)

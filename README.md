@@ -1,343 +1,154 @@
-# 🕊️ BibliBot - Biblical Sermon RAG Chatbot
+# BibliBot
 
-A production-ready Retrieval-Augmented Generation (RAG) chatbot that answers questions about Biblical sermons using AI.
+A sermon search bot for [insightfulsermons.com](https://www.insightfulsermons.com).
+Someone types what they are looking for and BibliBot points them at sermon
+summaries on the site: title, speaker, and a link.
 
----
-
-## ✨ Features
-
-- 🤖 **AI-Powered Answers** - Uses Groq's Llama 3.3 70B for natural, conversational responses
-- 📚 **Sermon Knowledge Base** - 20+ sermons across topics like Faith, Grace, Prayer, Love, and Hope
-- 🔍 **Smart Search** - Vector similarity search via Pinecone for relevant context retrieval
-- 💬 **Conversational UI** - Clean, responsive chat widget that works on any device
-- 🔄 **Auto-Updates** - Daily automated scraping of new sermons at midnight
-- ⚡ **Fast & Reliable** - Direct SDK integration (no LangChain) for stability
+It deliberately does **not** write answers about the Bible. Every line it returns
+about a sermon is either the sermon's own title or a link to it, so there is
+nothing for a language model to get wrong.
 
 ---
 
-## 🚀 Quick Start
+## What it can search by
 
-### Prerequisites
+| Ask for | Example | How it is answered |
+| --- | --- | --- |
+| A subject | "how do I forgive someone" | Vector search over the sermon text |
+| A category | "what is stewardship" | The site's own category, matched exactly |
+| An author | "Jonathan Edwards" | The speaker credited in the sermon summary |
 
-- Python 3.11
-- Pinecone account (free tier)
-- Groq API key (free tier)
+Routing matters here. An author's name is a few words buried inside a 500-word
+chunk and a category is not in the sermon text at all, so a pure vector search
+answers both badly. Each kind of question goes to the index that can actually
+answer it, and only genuine subject questions reach Pinecone.
 
-### Installation
-
-```bash
-# Clone the repository
-git clone [your-repo-url]
-cd [your-directory-name]
-
-# Create virtual environment
-conda create -n rag_env python=3.11 -y
-conda activate rag_env
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env and add your API keys
-```
-
-### Configuration
-Create a `.env` file with:
-
-```bash
-PINECONE_API_KEY=your_pinecone_api_key_here
-GROQ_API_KEY=your_groq_api_key_here
-```
-
-**Getting API Keys:**
-- Groq: https://console.groq.com (free, fast, 30 req/min)
-- Pinecone: https://app.pinecone.io (free tier: 100k vectors)
-
-### Pinecone Setup
-
-1. Create index named `sermon-index`
-2. Dimensions: **384** (for all-MiniLM-L6-v2)
-3. Metric: **cosine**
-
-### Initial Data Load
-
-```bash
-# Option 1: Scrape fresh data
-python ingestion/scrape_and_embed_fixed.py
-
-# Option 2: Upload existing data
-python ingestion/upload_data.py
-```
-
-### Run the Server
-
-```bash
-python server.py
-```
-
-Open http://localhost:5001 in your browser.
+Results are paged: the bot says how many it found ("3 of the 14 sermons by
+Jonathan Edwards") and "more" walks through the rest without repeating itself.
 
 ---
 
-## 🏗️ Architecture
+## Running it
 
-```
-┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│   User UI   │─────▶│ Flask Server │─────▶│  Pinecone   │
-│ (index.html)│      │  (server.py) │      │  (vectors)  │
-└─────────────┘      └──────────────┘      └─────────────┘
-                            │
-                            ▼
-                     ┌──────────────┐
-                     │  Groq LLM    │
-                     │ (Llama 3.3)  │
-                     └──────────────┘
-```
+Python 3.11.
 
-**Flow:**
-1. User asks question → Flask endpoint
-2. Question embedded → Search Pinecone for relevant sermons
-3. Context + question → Groq LLM
-4. Generated answer → User
-
----
-
-## 📁 Project Structure
-
-```
-RAG_LLM_2024/
-├── .github/workflows/
-│   └── daily_scraping.yml      # Automated daily scraping
-├── data/                       # Scraped sermon backups
-├── ingestion/
-│   ├── scrape_and_embed_fixed.py  # Main scraper
-│   ├── upload_existing_data.py    # Manual data upload
-│   └── debug_scraper.py           # Debugging tool
-├── static/
-│   ├── chatbot_logo.png
-│   └── send_logo.png
-├── templates/
-│   └── index.html              # Frontend UI
-├── embeddings.py               # Embedding generation
-├── llm.py                      # Groq LLM integration
-├── retrieval.py                # Pinecone queries
-├── server.py                   # Flask API server
-├── test_system.py              # System verification
-├── requirements.txt            # Dependencies
-├── .env                        # API keys (gitignored)
-└── README.md
-```
-
----
-
-## 🔧 Key Components
-
-### `server.py`
-Flask server with `/chat` endpoint. Handles retrieval + generation pipeline.
-
-### `llm.py`
-Groq API integration with smart routing:
-- Greetings → Friendly responses
-- Questions → RAG-based answers from sermons
-
-### `retrieval.py`
-Pinecone vector search for relevant sermon chunks.
-
-### `embeddings.py`
-Sentence-transformers (all-MiniLM-L6-v2) for query/document embeddings.
-
-### `ingestion/scrape_and_embed_fixed.py`
-Scrapes insightfulsermons.com, chunks content, embeds, and uploads to Pinecone.
-
----
-
-## 🤖 Automated Daily Scraping
-
-GitHub Actions runs scraping daily at midnight UTC.
-
-**Setup:**
-1. Add secrets to GitHub repo:
-   - `PINECONE_API_KEY`
-   - `GROQ_API_KEY`
-2. Push `.github/workflows/daily_scraping.yml`
-3. Manual trigger: Actions tab → Run workflow
-
-**Logs:** Check GitHub Actions tab for run history.
-
----
-
-## 🧪 Testing
-
-```bash
-# Verify entire system
-python test_system.py
-
-# Test specific components
-python -c "from embeddings import embed; print(len(embed('test')))"
-python -c "from retrieval import retrieve; print(len(retrieve('faith')))"
-```
-
----
-
-## 📊 API Endpoints
-
-### `GET /`
-Serves the main chat UI (index.html).
-
-### `POST /chat`
-Main chatbot endpoint.
-
-**Request:**
-```json
-{
-  "message": "What is faith?"
-}
-```
-
-**Response:**
-```json
-{
-  "answer": "Faith is trust in God. It means believing in what you cannot see..."
-}
-```
-
-### `GET /health`
-Health check endpoint.
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "service": "BibliBot RAG API",
-  "version": "2.0"
-}
-```
-
----
-
-## 🚀 Deployment
-
-### Option 1: Render (Recommended)
-
-1. Push code to GitHub
-2. Create new Web Service on Render
-3. Connect repository
-4. Add environment variables
-5. Deploy
-
-**Build Command:**
 ```bash
 pip install -r requirements.txt
+cp .env.example .env      # then fill in the keys
+python server.py          # http://localhost:5000
 ```
 
-**Start Command:**
+`.env`:
+
+```
+PINECONE_API_KEY=...      # https://app.pinecone.io
+GROQ_API_KEY=...          # https://console.groq.com  (not used at request time)
+PINECONE_INDEX=sermon-index
+PORT=5000
+```
+
+The Pinecone index must be 384 dimensions, cosine similarity, to match
+`all-MiniLM-L6-v2`.
+
+### Tests
+
 ```bash
-python server.py
-```
-
-### Option 2: Railway
-
-Similar setup to Render. Add env vars in Railway dashboard.
-
-### Option 3: Docker
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD ["python", "server.py"]
+python tests/test_search.py    # search routing; no network needed
+python tests/test_system.py    # environment, Pinecone, imports
 ```
 
 ---
 
-## 🔒 Security Notes
+## How a request is served
 
-- Never commit `.env` file (gitignored)
-- Rotate API keys regularly
-- Use environment variables for production
-- Keep dependencies updated for security patches
+```
+question
+   |
+   +-- greeting?  ------------------------------> canned reply
+   |
+   +-- names an author?  -----------------------> catalog lookup
+   |
+   +-- names a site category?  -----------------> catalog + category-filtered vector search
+   |
+   +-- otherwise ------------------------------> vector search over sermon chunks
+                                                    |
+                                                    +-- nothing above threshold?
+                                                          -> local keyword scan
+```
 
----
+The catalog (`app/catalog.py`) is built in memory at startup from
+`data/sermon_data.json`: every sermon's title, URL, category, and the speakers
+credited in its text. It is what makes author and category search exact.
 
-## 🐛 Troubleshooting
-
-### "No documents retrieved"
-- Check Pinecone has data: Run `python test_system.py`
-- Verify index dimension is 384
-- Re-run ingestion script
-
-### "Groq API error"
-- Check API key in `.env`
-- Verify free tier quota at console.groq.com
-- Check rate limits (30 req/min)
-
-### Scraping fails
-- Website structure may have changed
-- Check `ingestion/ingestion.log` for details
-- Use `debug_scraper.py` to investigate
-
-### Frontend doesn't connect
-- Ensure server is running on port 5001
-- Check CORS settings in `server.py`
-- Verify browser console for errors
+Topic search blends Pinecone's similarity with keyword overlap, plus a bonus
+when the query's words appear in the **title** — "children" in "DISCIPLINE Your
+Children" is what the sermon is about, while "children" in "The Holy Spirit's
+Intercession" is one passing mention.
 
 ---
 
-## 📈 Performance
+## Layout
 
-- **Query latency:** 1-3 seconds
-- **Embedding:** ~100ms
-- **Retrieval:** ~200ms
-- **LLM generation:** 500ms-2s
-- **Throughput:** ~20 queries/minute (Groq free tier)
+```
+server.py            Flask app: routing, paging, response formatting
+app/
+  catalog.py         In-memory sermon catalog; author and category indexes
+  search.py          Author / category / topic lookup and ranking
+  embeddings.py      sentence-transformers wrapper (all-MiniLM-L6-v2, 384-dim)
+  memory.py          SQLite conversation history, keyed by session id
+  retrieval.py       Thin Pinecone wrapper (used by tests)
+  llm.py             Groq integration; kept, but not on the request path
+ingestion/
+  scrape_and_embed.py  Daily Selenium scraper, run by GitHub Actions
+  upload_data.py       One-time uploader for data/sermon_data.json
+  bible_parser.py      Bible PDF -> JSON
+  upload_bible.py      Bible verses -> Pinecone
+  fix.py               Re-upload with trimmed metadata
+data/
+  sermon_data.json   The corpus: content, url, category per sermon
+  NLT_Bible/         Parsed Bible JSON (source PDFs are gitignored)
+deploy/
+  weebly_embed.html  The production widget, pasted into the Weebly page editor
+templates/
+  index.html         Standalone chat UI, for local development
+tests/
+```
 
----
+### Ingestion
 
-## 🛠️ Tech Stack
-
-- **Backend:** Flask 3.1.0
-- **LLM:** Groq (Llama 3.3 70B)
-- **Embeddings:** sentence-transformers (all-MiniLM-L6-v2)
-- **Vector DB:** Pinecone
-- **Scraping:** Selenium + Chrome
-- **Frontend:** Vanilla HTML/CSS/JavaScript
-
----
-
-## 📝 Maintenance
-
-### Weekly Tasks
-- Check GitHub Actions logs
-- Verify scraping succeeded
-- Monitor Pinecone vector count
-
-### Monthly Tasks
-- Review Groq usage
-- Update dependencies if needed (run `pip-audit`)
-- Check for sermon website changes
-
-### Quarterly Tasks
-- Rotate API keys
-- Review and optimize prompts
-- Update documentation
+`ingestion/scrape_and_embed.py` runs daily from GitHub Actions, adds sermons the
+index has not seen, and commits the refreshed `data/sermon_data.json` back to the
+repo. Run ingestion scripts from the repo root. For the Bible pipeline the order
+is `bible_parser.py` then `upload_bible.py`.
 
 ---
 
-## 🎯 Roadmap
+## Endpoints
 
-- [ ] Add conversation memory (multi-turn chat)
-- [ ] Include sermon citations in responses
-- [ ] Support more sermon sources
-- [ ] Add analytics dashboard
-- [ ] Multi-language support
-- [ ] Voice input/output
+`POST /chat`
+
+```json
+{ "message": "Jonathan Edwards", "session_id": "abc-123" }
+```
+
+```json
+{ "answer": "Here are 3 of the 14 sermons by Jonathan Edwards: ..." }
+```
+
+The answer is markdown; links render as `[Read the sermon](url)`. `session_id`
+scopes conversation history so "more" means more for that person only. It is
+optional, and anonymous sessions are supported.
+
+`GET /health` returns status and the number of sermons in the catalog.
 
 ---
 
-## 👥 Contributors
+## Deployment
 
-- Edan Barrios - Developer
-- Luke Kottom - Developer (2024)
+The API runs on Render and redeploys on push to `main`. The chat widget lives in
+the Weebly page editor, not on Render: `deploy/weebly_embed.html` is the source
+of truth for it and has to be pasted in by hand after a change.
+
+Weebly drops characters on large pastes, so that file keeps every line short
+with one HTML attribute per line. Copy it from the file, never from terminal
+output, and check the paste by diffing the live page against it.
